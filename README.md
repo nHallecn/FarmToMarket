@@ -1,36 +1,61 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# FarmToMarket Cameroon
 
-## Getting Started
+A mobile-first, B2B agricultural marketplace and fulfillment pilot built from the supplied Version 1 requirements and system design document.
 
-First, run the development server:
+The application demonstrates the complete managed procurement flow:
+
+1. A buyer posts a multi-item demand.
+2. Verified farmers submit full or partial quotes.
+3. Operations combines multiple farmers into one fulfillment plan.
+4. The buyer confirms one consolidated offer and payment reference.
+5. Operations coordinates pickup and delivery.
+6. The buyer accepts delivery or opens an evidence-backed dispute.
+
+## Run locally
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+Run the full verification suite with:
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm run check
+```
 
-## Learn More
+## Demo access
 
-To learn more about Next.js, take a look at the following resources:
+Use the sign-in screen's role selector. The prototype includes seeded workspaces for:
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- Buyer: demands, marketplace, consolidated offers, orders, payments, delivery acceptance, and disputes.
+- Farmer: supply listings, buyer request matching, quotes, allocations, pickups, and settlement visibility.
+- Operations: verifications, fulfillment allocation, offers, order control, logistics, reconciliation, disputes, catalogue, KPIs, and audit logs.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+No real credentials, payments, SMS, WhatsApp messages, or identity documents are processed. Interactive demo state is versioned and persisted in browser `localStorage`; use **Reset demo** in the operations workspace to restore the seed.
 
-## Deploy on Vercel
+## Technical shape
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- Next.js 16 App Router, React 19, and TypeScript
+- Tailwind CSS 4 design system
+- Route handlers under `/api/v1` for the demo REST surface
+- Installable manifest and production service worker shell
+- English/French-ready state and notification content
+- Server-style domain validation, role checks, lifecycle transitions, notification events, and append-only audit records in the client demo store
+- Vitest coverage for data integrity and critical calculations
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+The in-browser store makes the full workflow reviewable without external credentials. A production deployment should replace it with PostgreSQL/Prisma, real authentication, private object storage, and provider adapters for licensed payments and messaging while preserving the domain types and lifecycle rules in `src/lib`.
+
+## Project map
+
+```text
+src/app/                         Routes, metadata, PWA, and demo API
+src/components/platform/         Buyer, farmer, and operations workspaces
+src/components/providers/        Persistent application state and PWA setup
+src/components/public/           Marketing, authentication, legal, and support UI
+src/lib/domain.ts                Domain types, formatting, and metrics
+src/lib/seed-data.ts             Cameroon pilot fixtures
+public/                          App icons, service worker, and optimized hero media
+```

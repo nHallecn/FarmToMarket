@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="FarmToMarket mark">
+  <rect width="512" height="512" rx="124" fill="#173f32"/>
+  <path d="M94 345c50-80 116-121 197-121 48 0 90 14 127 43" fill="none" stroke="#d9ef72" stroke-width="34" stroke-linecap="round"/>
+  <path d="M109 399c43-62 99-93 168-93 52 0 97 17 134 50" fill="none" stroke="#f5f2e8" stroke-width="29" stroke-linecap="round"/>
+  <path d="M258 231c-5-65 23-111 85-139 11 67-17 113-85 139Z" fill="#d9ef72"/>
+  <path d="M254 238c-41-44-84-54-130-31 40 51 83 61 130 31Z" fill="#e98545"/>
+  <path d="M255 236v104" stroke="#d9ef72" stroke-width="24" stroke-linecap="round"/>
+</svg>
