@@ -32,6 +32,7 @@ const content = {
       ["Why we use it", "To operate the managed marketplace, verify trust, match supply, coordinate fulfillment, prevent abuse, reconcile regulated third-party payments, provide support, and meet legal obligations."],
       ["Who can see it", "Marketplace listings expose only approved commercial details. Private identity documents and financial references are restricted to authorised staff and service providers. Farmers never see another farmer’s confidential quote or contact data."],
       ["Storage and retention", "Verification files belong in private object storage. Transaction and audit records are retained for operational and legal needs; information no longer needed is deleted or anonymised according to the final retention schedule."],
+      ["AI-assisted features", "FarmToMarket Copilot sends the user prompt and a limited operational summary to OpenAI through our server. The summary is designed to exclude passwords, verification files, phone numbers, email addresses, and raw payment references. Do not enter sensitive information in a Copilot prompt, and review every suggestion before using it."],
       ["Your choices", "You may request access, correction, or deletion where retention obligations allow. You can also change notification preferences and preferred language from your account."],
       ["Contact", "Send privacy requests through the support page with the subject “Privacy request”. Identity verification may be required before protected records are disclosed or changed."],
     ],
@@ -47,6 +48,7 @@ const content = {
       ["Supply, quotes, and orders", "Quantities require a controlled unit. A farmer may quote part of a demand. The buyer receives one consolidated offer, while supplier allocations and confidential pricing remain appropriately separated."],
       ["Payment", "Payment is completed with an approved external provider or verified bank transfer. A payment is successful only after a verified provider response or authorised reconciliation decision."],
       ["Delivery and acceptance", "Operations records shipment milestones and proof where available. After delivery, the buyer must accept the order or report an issue within the configured acceptance window."],
+      ["AI suggestions", "Copilot outputs are optional drafting and decision-support suggestions. They do not confirm supply, set a binding price, submit a transaction, or replace legal, financial, food-safety, or professional review."],
       ["Cancellation and disputes", "Cancellation after confirmation may require approval or fees based on the payment and shipment stage. Disputes require a reason and evidence; every resolution and financial adjustment is recorded."],
     ],
   },
@@ -86,7 +88,7 @@ function LegalContent({ kind }: { kind: "privacy" | "terms" }) {
             <p className="eyebrow mt-6">{page.eyebrow}</p>
             <h1 className="font-display mt-3 text-4xl font-semibold leading-[1.04] tracking-[-0.045em] text-[var(--forest)] sm:text-5xl">{page.title}</h1>
             <p className="mt-5 leading-7 text-[var(--muted)]">{page.intro}</p>
-            <p className="mt-6 rounded-xl bg-[var(--orange-soft)] p-4 text-xs leading-5 text-[var(--forest)]"><strong>Pilot notice:</strong> Updated 21 July 2026. This product prototype does not process real identity documents or payments.</p>
+            <p className="mt-6 rounded-xl bg-[var(--orange-soft)] p-4 text-xs leading-5 text-[var(--forest)]"><strong>Pilot notice:</strong> Updated 22 July 2026. This product prototype does not process real identity documents or payments.</p>
           </aside>
           <section className="surface divide-y divide-[var(--line)] overflow-hidden">
             {page.sections.map(([title, text], index) => <article key={title} className="p-5 sm:p-7"><div className="flex items-start gap-4"><span className="grid size-8 flex-none place-items-center rounded-full bg-[var(--sage)] text-xs font-black text-[var(--forest)]">{index + 1}</span><div><h2 className="text-lg font-black text-[var(--ink)]">{title}</h2><p className="mt-2 text-sm leading-7 text-[var(--muted)]">{text}</p></div></div></article>)}

@@ -32,6 +32,7 @@ import {
   X,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { AiCopilot } from "@/components/platform/ai-copilot";
 import { Brand } from "@/components/public/brand";
 import { useApp } from "@/components/providers/app-provider";
 import type { UserRole } from "@/lib/domain";
@@ -317,6 +318,8 @@ export function PlatformShell({
           );
         })}
       </nav>
+
+      <AiCopilot role={role} section={section} />
     </div>
   );
 }
