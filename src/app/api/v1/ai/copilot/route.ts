@@ -91,6 +91,16 @@ function serviceErrorResponse(error: CopilotServiceError, requestId: string) {
     });
   }
 
+  if (error.kind === "provider_limited") {
+    return errorResponse({
+      status: 429,
+      code: "AI_PROVIDER_LIMITED",
+      message:
+        "The OpenAI account is rate-limited or out of quota. Review API usage and billing, or try again later.",
+      requestId,
+    });
+  }
+
   return errorResponse({
     status: 503,
     code: "AI_TEMPORARILY_UNAVAILABLE",
@@ -158,4 +168,3 @@ export async function POST(request: Request) {
     });
   }
 }
-

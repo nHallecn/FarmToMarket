@@ -66,6 +66,7 @@ The AI integration does not replace the prototype's storage model: workflow reco
 ### Deployment notes
 
 - Configure `OPENAI_API_KEY` in the hosting platform's encrypted server-side secret store and set `OPENAI_MODEL` separately for each environment.
+- Ensure the OpenAI API project has an active usage tier or available credits; a valid key alone does not provide inference quota.
 - Use distinct keys for development, staging, and production; restrict access, monitor usage, and rotate a key immediately if exposure is suspected. Restart or redeploy after rotation.
 - The endpoint validates input and applies application-level rate limiting. For a multi-instance or serverless production deployment, use a shared limiter such as Redis or a managed rate-limit service so limits apply across every instance.
 - Add authenticated user and organization quotas, request logging that excludes prompt contents and secrets, spend alerts, and observability before serving production traffic.

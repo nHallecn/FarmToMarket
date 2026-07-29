@@ -25,6 +25,7 @@ export type CopilotServiceErrorKind =
   | "not_configured"
   | "blocked"
   | "invalid_response"
+  | "provider_limited"
   | "unavailable";
 
 export class CopilotServiceError extends Error {
@@ -32,6 +33,13 @@ export class CopilotServiceError extends Error {
     super(kind);
     this.name = "CopilotServiceError";
   }
+}
+
+function providerStatus(error: unknown) {
+  if (typeof error !== "object" || error === null || !("status" in error)) {
+    return null;
+  }
+  return typeof error.status === "number" ? error.status : null;
 }
 
 let cachedClient: OpenAI | undefined;
@@ -226,6 +234,13 @@ export async function generateCopilotResult(
     };
   } catch (error) {
     if (error instanceof CopilotServiceError) throw error;
+    const status = providerStatus(error);
+    if (status === 401 || status === 403) {
+      throw new CopilotServiceError("not_configured");
+    }
+    if (status === 429) {
+      throw new CopilotServiceError("provider_limited");
+    }
     throw new CopilotServiceError("unavailable");
   }
 }

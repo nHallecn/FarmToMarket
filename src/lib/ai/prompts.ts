@@ -25,7 +25,7 @@ const roleRules: Record<CopilotRole, string> = {
 
 const localeRule: Record<CopilotLocale, string> = {
   en: "Write every user-visible field in clear, concise English.",
-  fr: "Rédige chaque champ visible par l’utilisateur en français clair et concis.",
+  fr: "Rédige chaque champ visible par l'utilisateur en français clair et concis.",
 };
 
 export function buildCopilotInstructions(
