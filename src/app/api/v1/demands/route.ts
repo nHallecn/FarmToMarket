@@ -101,6 +101,19 @@ export async function POST(request: Request) {
     });
   }
 
+  if (
+    process.env.NODE_ENV === "production" &&
+    process.env.ALLOW_DEMO_STATE_WRITES !== "true"
+  ) {
+    return errorResponse({
+      status: 403,
+      code: "DEMO_STATE_WRITES_DISABLED",
+      message:
+        "Demo demand writes are disabled in production. Enable them only for an intentional synthetic pilot.",
+      requestId,
+    });
+  }
+
   const parsed = await parseBoundedJsonBody(
     request,
     MAX_DEMAND_BODY_BYTES,
