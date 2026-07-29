@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type FormEvent, type ReactNode } from "react";
+import { useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import Link from "next/link";
 import {
   AlertCircle,
@@ -68,7 +68,7 @@ import {
 
 type AppContext = ReturnType<typeof useApp>;
 type Notice = { kind: "success" | "error"; message: string } | null;
-type RunAction = (message: string, task: () => void) => boolean;
+type RunAction = (message: string, task: () => Promise<unknown>) => Promise<boolean>;
 
 type ListingDraft = {
   productId: UUID;
@@ -243,6 +243,8 @@ export function FarmerWorkspace({ section }: { section: string }) {
   const [notice, setNotice] = useState<Notice>(null);
   const [listingModalOpen, setListingModalOpen] = useState(false);
   const [quoteModalOpen, setQuoteModalOpen] = useState(false);
+  const [actionPending, setActionPending] = useState(false);
+  const actionPendingRef = useRef(false);
   const [listingFilter, setListingFilter] = useState<ListingStatus | "all">("all");
   const [quoteFilter, setQuoteFilter] = useState<QuoteStatus | "all">("all");
   const firstProduct = app.state.products.find((product) => product.active) ?? app.state.products[0];
@@ -297,9 +299,12 @@ export function FarmerWorkspace({ section }: { section: string }) {
   const copy = sectionCopy[activeSection];
   const verified = organisation?.verificationStatus === "verified";
 
-  const runAction: RunAction = (message, task) => {
+  const runAction: RunAction = async (message, task) => {
+    if (actionPendingRef.current) return false;
+    actionPendingRef.current = true;
+    setActionPending(true);
     try {
-      task();
+      await task();
       setNotice({ kind: "success", message });
       return true;
     } catch (error) {
@@ -308,6 +313,9 @@ export function FarmerWorkspace({ section }: { section: string }) {
         message: error instanceof Error ? error.message : "That action could not be completed.",
       });
       return false;
+    } finally {
+      actionPendingRef.current = false;
+      setActionPending(false);
     }
   };
 
@@ -356,9 +364,9 @@ export function FarmerWorkspace({ section }: { section: string }) {
     setQuoteModalOpen(true);
   };
 
-  const handleCreateListing = (event: FormEvent<HTMLFormElement>) => {
+  const handleCreateListing = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const created = runAction("Supply listing created and added to your workspace.", () => {
+    const created = await runAction("Supply listing created and added to your workspace.", () =>
       app.actions.createListing({
         farmerOrganisationId: organisationId,
         productId: listingDraft.productId,
@@ -371,14 +379,14 @@ export function FarmerWorkspace({ section }: { section: string }) {
         availableUntil: listingDraft.availableUntil,
         notes: listingDraft.notes.trim() || undefined,
         status: listingDraft.status,
-      });
-    });
+      }),
+    );
     if (created) setListingModalOpen(false);
   };
 
-  const handleSubmitQuote = (event: FormEvent<HTMLFormElement>) => {
+  const handleSubmitQuote = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    const submitted = runAction("Your quote was submitted to the buyer request.", () => {
+    const submitted = await runAction("Your quote was submitted to the buyer request.", () =>
       app.actions.submitQuote({
         demandItemId: quoteDraft.demandItemId,
         farmerOrganisationId: organisationId,
@@ -387,8 +395,8 @@ export function FarmerWorkspace({ section }: { section: string }) {
         unitPrice: Number(quoteDraft.unitPrice),
         availableDate: quoteDraft.availableDate,
         notes: quoteDraft.notes.trim() || undefined,
-      });
-    });
+      }),
+    );
     if (submitted) setQuoteModalOpen(false);
   };
 
@@ -525,8 +533,8 @@ export function FarmerWorkspace({ section }: { section: string }) {
             <ImagePlus aria-hidden="true" className="size-5 shrink-0 text-[var(--forest)]" /> The catalogue product image is used in this demo. Production uploads will be compressed before publishing.
           </div>
           <div className="flex flex-col-reverse gap-3 border-t border-[var(--line)] pt-5 sm:flex-row sm:justify-end">
-            <button type="button" onClick={() => setListingModalOpen(false)} className={secondaryButtonClass}>Cancel</button>
-            <button type="submit" className={primaryButtonClass}><Leaf aria-hidden="true" size={17} /> {listingDraft.status === "active" ? "Publish supply" : "Save draft"}</button>
+            <button type="button" disabled={actionPending} onClick={() => setListingModalOpen(false)} className={secondaryButtonClass}>Cancel</button>
+            <button type="submit" disabled={actionPending} className={primaryButtonClass}><Leaf aria-hidden="true" size={17} /> {actionPending ? "Saving…" : listingDraft.status === "active" ? "Publish supply" : "Save draft"}</button>
           </div>
         </form>
       </Modal>
@@ -591,8 +599,8 @@ export function FarmerWorkspace({ section }: { section: string }) {
               <p className="mt-1 text-xs text-[var(--muted)]">Final quantity is confirmed by fulfillment before the order is created.</p>
             </div>
             <div className="flex flex-col-reverse gap-3 border-t border-[var(--line)] pt-5 sm:flex-row sm:justify-end">
-              <button type="button" onClick={() => setQuoteModalOpen(false)} className={secondaryButtonClass}>Cancel</button>
-              <button type="submit" disabled={!verified} className={primaryButtonClass}><Send aria-hidden="true" size={16} /> Submit quote</button>
+              <button type="button" disabled={actionPending} onClick={() => setQuoteModalOpen(false)} className={secondaryButtonClass}>Cancel</button>
+              <button type="submit" disabled={!verified || actionPending} className={primaryButtonClass}><Send aria-hidden="true" size={16} /> {actionPending ? "Submitting…" : "Submit quote"}</button>
             </div>
           </form>
         ) : null}
@@ -1098,9 +1106,11 @@ function NotificationsSection({ app, runAction }: { app: AppContext; runAction: 
   const unread = notifications.filter((notification) => !notification.readAt);
 
   const markAllRead = () => {
-    runAction("All notifications marked as read.", () => {
-      unread.forEach((notification) => app.actions.markNotificationRead(notification.id));
-    });
+    void runAction("All notifications marked as read.", () =>
+      Promise.all(
+        unread.map((notification) => app.actions.markNotificationRead(notification.id)),
+      ),
+    );
   };
 
   if (notifications.length === 0) {
@@ -1118,7 +1128,7 @@ function NotificationsSection({ app, runAction }: { app: AppContext; runAction: 
               <article key={notification.id} className={`flex gap-4 px-5 py-5 sm:px-6 ${notification.readAt ? "bg-[var(--white)]" : "bg-[var(--sage)]/30"}`}>
                 <span className={`grid size-11 shrink-0 place-items-center rounded-2xl ${notification.readAt ? "bg-[var(--cream)] text-[var(--forest)]" : "bg-[var(--forest)] text-[var(--lime)]"}`}><Icon aria-hidden="true" size={19} /></span>
                 <div className="min-w-0 flex-1"><div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-1"><h3 className="text-sm font-black text-[var(--ink)]">{localise(notification.title, app.locale)}</h3><span className="text-[10px] font-bold text-[var(--muted)]">{formatDate(notification.createdAt, localeCode(app.locale))}</span></div><p className="mt-1.5 text-sm leading-6 text-[var(--muted)]">{localise(notification.message, app.locale)}</p><div className="mt-3 flex flex-wrap items-center gap-2"><span className="rounded-full border border-[var(--line)] bg-[var(--white)] px-2.5 py-1 text-[10px] font-extrabold text-[var(--muted)]">{humanize(notification.type)}</span>{notification.channels.map((channel) => <span key={channel} className="text-[10px] font-bold text-[var(--muted)]">{humanize(channel)}</span>)}</div></div>
-                {!notification.readAt ? <button type="button" aria-label={`Mark ${localise(notification.title, app.locale)} as read`} onClick={() => runAction("Notification marked as read.", () => app.actions.markNotificationRead(notification.id))} className="mt-1 grid size-9 shrink-0 place-items-center rounded-full border border-[var(--line)] bg-[var(--white)] text-[var(--forest)] hover:bg-[var(--cream)]"><Check aria-hidden="true" size={16} /></button> : null}
+                {!notification.readAt ? <button type="button" aria-label={`Mark ${localise(notification.title, app.locale)} as read`} onClick={() => void runAction("Notification marked as read.", () => app.actions.markNotificationRead(notification.id))} className="mt-1 grid size-9 shrink-0 place-items-center rounded-full border border-[var(--line)] bg-[var(--white)] text-[var(--forest)] hover:bg-[var(--cream)]"><Check aria-hidden="true" size={16} /></button> : null}
               </article>
             );
           })}

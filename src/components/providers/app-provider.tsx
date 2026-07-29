@@ -10,6 +10,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { usePathname } from "next/navigation";
 import {
   deriveDashboardMetrics,
   isLocale,
@@ -44,33 +45,48 @@ import {
 } from "@/lib/domain";
 import { createSeedState } from "@/lib/seed-data";
 
-export const APP_STORAGE_KEY = "farmtomarket-cameroon:v1:demo-state";
+export const APP_SESSION_STORAGE_KEY = "farmtomarket-cameroon:v1:browser-session";
+
+type BrowserSession = Pick<DomainState, "activeUserId" | "activeRole" | "locale">;
+
+interface StateApiPayload {
+  data?: {
+    state?: unknown;
+    persisted?: unknown;
+  };
+  message?: unknown;
+}
 
 export interface AppActions {
   switchRole: (role: UserRole) => void;
   switchUser: (userId: UUID) => void;
   switchLocale: (locale: Locale) => void;
   setLocale: (locale: Locale) => void;
-  resetDemo: () => void;
-  createListing: (input: CreateListingInput) => UUID;
-  createDemand: (input: CreateDemandInput) => UUID;
-  submitQuote: (input: SubmitQuoteInput) => UUID;
-  createAllocation: (input: CreateAllocationInput) => UUID;
-  createOffer: (input: CreateOfferInput) => UUID;
-  confirmOrder: (orderId: UUID) => void;
-  confirmPayment: (input: ConfirmPaymentInput) => UUID;
-  advanceShipment: (shipmentId: UUID) => void;
-  acceptDelivery: (orderId: UUID) => void;
-  openDispute: (input: OpenDisputeInput) => UUID;
-  resolveDispute: (input: ResolveDisputeInput) => void;
-  verifyOrganisation: (input: VerifyOrganisationInput) => void;
-  markNotificationRead: (notificationId: UUID) => void;
+  resetDemo: () => Promise<void>;
+  createListing: (input: CreateListingInput) => Promise<UUID>;
+  createDemand: (input: CreateDemandInput) => Promise<UUID>;
+  submitQuote: (input: SubmitQuoteInput) => Promise<UUID>;
+  createAllocation: (input: CreateAllocationInput) => Promise<UUID>;
+  createOffer: (input: CreateOfferInput) => Promise<UUID>;
+  confirmOrder: (orderId: UUID) => Promise<void>;
+  confirmPayment: (input: ConfirmPaymentInput) => Promise<UUID>;
+  advanceShipment: (shipmentId: UUID) => Promise<void>;
+  acceptDelivery: (orderId: UUID) => Promise<void>;
+  openDispute: (input: OpenDisputeInput) => Promise<UUID>;
+  resolveDispute: (input: ResolveDisputeInput) => Promise<void>;
+  verifyOrganisation: (input: VerifyOrganisationInput) => Promise<void>;
+  markNotificationRead: (notificationId: UUID) => Promise<void>;
 }
 
 export interface AppContextValue {
   state: DomainState;
   hydrated: boolean;
   isHydrated: boolean;
+  isPersisting: boolean;
+  loadError: string | null;
+  persistenceError: string | null;
+  retryHydration: () => void;
+  clearPersistenceError: () => void;
   currentUser?: User;
   currentOrganisation?: Organisation;
   currentRole: UserRole;
@@ -231,6 +247,92 @@ function restoreState(value: unknown): DomainState | null {
   return state;
 }
 
+function parseStateResponse(value: unknown): DomainState {
+  if (!value || typeof value !== "object") {
+    throw new Error("The database returned an invalid response.");
+  }
+  const payload = value as StateApiPayload;
+  const state = restoreState(payload.data?.state);
+  if (!state || payload.data?.persisted !== true) {
+    throw new Error("The database returned an invalid application state.");
+  }
+  return state;
+}
+
+function responseMessage(value: unknown, fallback: string) {
+  if (!value || typeof value !== "object") return fallback;
+  const message = (value as StateApiPayload).message;
+  return typeof message === "string" && message.trim() ? message : fallback;
+}
+
+async function readJson(response: Response): Promise<unknown> {
+  try {
+    return (await response.json()) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function overlaySession(state: DomainState, session: Partial<BrowserSession>): DomainState {
+  const requestedRole = isRole(session.activeRole) ? session.activeRole : state.activeRole;
+  const requestedUser =
+    typeof session.activeUserId === "string"
+      ? state.users.find(
+          (user) =>
+            user.id === session.activeUserId &&
+            user.status === "active" &&
+            user.roles.includes(requestedRole),
+        )
+      : undefined;
+  const canonicalUser = state.users.find(
+    (user) =>
+      user.id === state.activeUserId &&
+      user.status === "active" &&
+      user.roles.includes(requestedRole),
+  );
+  const roleUser =
+    state.users.find(
+      (user) =>
+        user.primaryRole === requestedRole &&
+        user.status === "active" &&
+        user.roles.includes(requestedRole),
+    ) ??
+    state.users.find(
+      (user) => user.status === "active" && user.roles.includes(requestedRole),
+    );
+  const user = requestedUser ?? canonicalUser ?? roleUser;
+  if (!user) return state;
+  const locale = isLocale(session.locale) ? session.locale : state.locale;
+  return {
+    ...state,
+    activeUserId: user.id,
+    activeRole: requestedRole,
+    locale,
+  };
+}
+
+function readBrowserSession(state: DomainState): DomainState {
+  let session: Partial<BrowserSession> = {};
+  try {
+    const raw = window.localStorage.getItem(APP_SESSION_STORAGE_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    if (parsed && typeof parsed === "object") {
+      const candidate = parsed as Partial<BrowserSession>;
+      session = {
+        activeUserId:
+          typeof candidate.activeUserId === "string" ? candidate.activeUserId : undefined,
+        activeRole: isRole(candidate.activeRole) ? candidate.activeRole : undefined,
+        locale: isLocale(candidate.locale) ? candidate.locale : undefined,
+      };
+    }
+    const legacyRole = window.localStorage.getItem("farmtomarket-role");
+    if (!session.activeRole && isRole(legacyRole)) session.activeRole = legacyRole;
+  } catch {
+    // A blocked browser store should not prevent canonical database hydration.
+  }
+  return overlaySession(state, session);
+}
+
 const shipmentTransitions: Partial<Record<ShipmentStatus, ShipmentStatus>> = {
   planned: "pickup_scheduled",
   pickup_scheduled: "picked_up",
@@ -240,45 +342,311 @@ const shipmentTransitions: Partial<Record<ShipmentStatus, ShipmentStatus>> = {
 };
 
 export function AppProvider({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  const isMarketplaceWorkspace =
+    pathname === "/buyer" ||
+    pathname.startsWith("/buyer/") ||
+    pathname === "/farmer" ||
+    pathname.startsWith("/farmer/") ||
+    pathname === "/operations" ||
+    pathname.startsWith("/operations/");
   const [state, setState] = useState<DomainState>(() => createSeedState());
   const [hydrated, setHydrated] = useState(false);
+  const [isPersisting, setIsPersisting] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [persistenceError, setPersistenceError] = useState<string | null>(null);
+  const [hydrationAttempt, setHydrationAttempt] = useState(0);
   const stateRef = useRef(state);
-
-  const commit = useCallback((recipe: (current: DomainState) => DomainState) => {
-    const next = recipe(stateRef.current);
-    stateRef.current = next;
-    setState(next);
-  }, []);
+  const mountedRef = useRef(false);
+  const serverUpdatedAtRef = useRef<string | null>(null);
+  const mutationVersionRef = useRef(0);
+  const pendingWritesRef = useRef(0);
+  const writeEpochRef = useRef(0);
+  const recoveringRef = useRef(false);
+  const writeQueueRef = useRef<Promise<void>>(Promise.resolve());
 
   useEffect(() => {
-    let restored: DomainState | null = null;
-    try {
-      const raw = window.localStorage.getItem(APP_STORAGE_KEY);
-      restored = raw ? restoreState(JSON.parse(raw) as unknown) : null;
-    } catch {
-      restored = null;
-    }
-    const next = restored ?? createSeedState();
-    const hydrationTask = window.setTimeout(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
+
+  const completeWrite = useCallback(() => {
+    pendingWritesRef.current = Math.max(0, pendingWritesRef.current - 1);
+    if (mountedRef.current) setIsPersisting(pendingWritesRef.current > 0);
+  }, []);
+
+  const reconcilePersistedState = useCallback(
+    (canonical: DomainState, mutationVersion: number) => {
+      serverUpdatedAtRef.current = canonical.updatedAt;
+      if (!mountedRef.current) return;
+      setPersistenceError(null);
+      if (mutationVersionRef.current !== mutationVersion) return;
+      const next = overlaySession(canonical, stateRef.current);
       stateRef.current = next;
       setState(next);
-      setHydrated(true);
-    }, 0);
-    return () => window.clearTimeout(hydrationTask);
+    },
+    [],
+  );
+
+  const recoverCanonicalState = useCallback(async (saveError: string) => {
+    recoveringRef.current = true;
+    writeEpochRef.current += 1;
+    mutationVersionRef.current += 1;
+    serverUpdatedAtRef.current = null;
+    const session: BrowserSession = {
+      activeUserId: stateRef.current.activeUserId,
+      activeRole: stateRef.current.activeRole,
+      locale: stateRef.current.locale,
+    };
+    if (mountedRef.current) {
+      setHydrated(false);
+      setPersistenceError(saveError);
+    }
+
+    try {
+      const response = await fetch("/api/v1/state", {
+        headers: { Accept: "application/json" },
+        cache: "no-store",
+      });
+      const payload = await readJson(response);
+      if (!response.ok) {
+        throw new Error(
+          responseMessage(payload, "The canonical database state could not be reloaded."),
+        );
+      }
+      const canonical = parseStateResponse(payload);
+      const next = overlaySession(canonical, session);
+      serverUpdatedAtRef.current = canonical.updatedAt;
+      if (mountedRef.current) {
+        stateRef.current = next;
+        setState(next);
+        setLoadError(null);
+        setHydrated(true);
+        setPersistenceError(saveError);
+      }
+    } catch (error) {
+      if (mountedRef.current) {
+        setLoadError(
+          error instanceof Error
+            ? `${saveError} ${error.message}`
+            : `${saveError} The canonical database state could not be reloaded.`,
+        );
+        setHydrated(false);
+      }
+    } finally {
+      recoveringRef.current = false;
+    }
   }, []);
+
+  const enqueueStateWrite = useCallback(
+    (snapshot: DomainState, mutationVersion: number) => {
+      const writeEpoch = writeEpochRef.current;
+      let resolveCompletion!: () => void;
+      let rejectCompletion!: (error: Error) => void;
+      const completion = new Promise<void>((resolve, reject) => {
+        resolveCompletion = resolve;
+        rejectCompletion = reject;
+      });
+      pendingWritesRef.current += 1;
+      if (mountedRef.current) {
+        setIsPersisting(true);
+        setPersistenceError(null);
+      }
+      writeQueueRef.current = writeQueueRef.current.then(async () => {
+        try {
+          if (writeEpoch !== writeEpochRef.current) {
+            rejectCompletion(
+              new Error("This change was cancelled while the database state was reloaded."),
+            );
+            return;
+          }
+          const expectedUpdatedAt = serverUpdatedAtRef.current;
+          if (!expectedUpdatedAt) {
+            throw new Error("The database revision is unavailable. Reload the workspace.");
+          }
+          const response = await fetch("/api/v1/state", {
+            method: "PUT",
+            headers: {
+              Accept: "application/json",
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({ state: snapshot, expectedUpdatedAt }),
+          });
+          const payload = await readJson(response);
+          if (!response.ok) {
+            const fallback =
+              response.status === 409
+                ? "This data changed in another session. Reload before making more changes."
+                : "The latest change could not be saved to the database.";
+            throw new Error(responseMessage(payload, fallback));
+          }
+          reconcilePersistedState(parseStateResponse(payload), mutationVersion);
+          resolveCompletion();
+        } catch (caught) {
+          const error =
+            caught instanceof Error
+              ? caught
+              : new Error("The latest change could not be saved to the database.");
+          await recoverCanonicalState(error.message);
+          rejectCompletion(error);
+        } finally {
+          completeWrite();
+        }
+      });
+      return completion;
+    },
+    [completeWrite, reconcilePersistedState, recoverCanonicalState],
+  );
+
+  const enqueueReset = useCallback(
+    (mutationVersion: number) => {
+      const writeEpoch = writeEpochRef.current;
+      let resolveCompletion!: () => void;
+      let rejectCompletion!: (error: Error) => void;
+      const completion = new Promise<void>((resolve, reject) => {
+        resolveCompletion = resolve;
+        rejectCompletion = reject;
+      });
+      pendingWritesRef.current += 1;
+      if (mountedRef.current) {
+        setIsPersisting(true);
+        setPersistenceError(null);
+      }
+      writeQueueRef.current = writeQueueRef.current.then(async () => {
+        try {
+          if (writeEpoch !== writeEpochRef.current) {
+            rejectCompletion(
+              new Error("The reset was cancelled while the database state was reloaded."),
+            );
+            return;
+          }
+          const response = await fetch("/api/v1/state/reset", {
+            method: "POST",
+            headers: { Accept: "application/json" },
+          });
+          const payload = await readJson(response);
+          if (!response.ok) {
+            throw new Error(
+              responseMessage(payload, "The demo database could not be reset."),
+            );
+          }
+          reconcilePersistedState(parseStateResponse(payload), mutationVersion);
+          resolveCompletion();
+        } catch (caught) {
+          const error =
+            caught instanceof Error
+              ? caught
+              : new Error("The demo database could not be reset.");
+          await recoverCanonicalState(error.message);
+          rejectCompletion(error);
+        } finally {
+          completeWrite();
+        }
+      });
+      return completion;
+    },
+    [completeWrite, reconcilePersistedState, recoverCanonicalState],
+  );
+
+  const commit = useCallback(
+    (
+      recipe: (current: DomainState) => DomainState,
+      options: { persist?: boolean } = {},
+    ) => {
+      if (options.persist !== false) {
+        assert(!recoveringRef.current, "The workspace is reloading its database state.");
+      }
+      const current = stateRef.current;
+      const next = recipe(current);
+      if (next === current) return Promise.resolve(next);
+      stateRef.current = next;
+      setState(next);
+      if (options.persist !== false) {
+        const mutationVersion = mutationVersionRef.current + 1;
+        mutationVersionRef.current = mutationVersion;
+        return enqueueStateWrite(next, mutationVersion).then(() => next);
+      }
+      return Promise.resolve(next);
+    },
+    [enqueueStateWrite],
+  );
+
+  useEffect(() => {
+    const controller = new AbortController();
+
+    void (async () => {
+      try {
+        const response = await fetch("/api/v1/state", {
+          headers: { Accept: "application/json" },
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const payload = await readJson(response);
+        if (!response.ok) {
+          throw new Error(
+            responseMessage(payload, "The workspace database could not be loaded."),
+          );
+        }
+        const canonical = parseStateResponse(payload);
+        const next = readBrowserSession(canonical);
+        if (controller.signal.aborted) return;
+        serverUpdatedAtRef.current = canonical.updatedAt;
+        mutationVersionRef.current += 1;
+        stateRef.current = next;
+        setState(next);
+        setHydrated(true);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        serverUpdatedAtRef.current = null;
+        setHydrated(false);
+        setLoadError(
+          error instanceof Error
+            ? error.message
+            : "The workspace database could not be loaded.",
+        );
+      }
+    })();
+
+    return () => controller.abort();
+  }, [hydrationAttempt]);
 
   useEffect(() => {
     if (!hydrated) return;
     try {
-      window.localStorage.setItem(APP_STORAGE_KEY, JSON.stringify(state));
+      const session: BrowserSession = {
+        activeUserId: state.activeUserId,
+        activeRole: state.activeRole,
+        locale: state.locale,
+      };
+      window.localStorage.setItem(APP_SESSION_STORAGE_KEY, JSON.stringify(session));
+      if (["buyer", "farmer", "operations"].includes(state.activeRole)) {
+        window.localStorage.setItem("farmtomarket-role", state.activeRole);
+      }
     } catch {
-      // The demo remains usable when storage is blocked or full.
+      // Browser session preferences are optional; canonical data is in PostgreSQL.
     }
-  }, [hydrated, state]);
+  }, [hydrated, state.activeRole, state.activeUserId, state.locale]);
+
+  const retryHydration = useCallback(() => {
+    writeEpochRef.current += 1;
+    mutationVersionRef.current += 1;
+    recoveringRef.current = false;
+    serverUpdatedAtRef.current = null;
+    setHydrated(false);
+    setLoadError(null);
+    setPersistenceError(null);
+    setHydrationAttempt((current) => current + 1);
+  }, []);
+
+  const clearPersistenceError = useCallback(() => {
+    setPersistenceError(null);
+  }, []);
 
   const switchRole = useCallback(
     (role: UserRole) => {
-      commit((current) => {
+      void commit((current) => {
         const user =
           current.users.find(
             (candidate) => candidate.primaryRole === role && candidate.status === "active",
@@ -288,106 +656,54 @@ export function AppProvider({ children }: { children: ReactNode }) {
           );
         assert(user, `No active demo user is available for the ${role} role.`);
         if (current.activeUserId === user.id && current.activeRole === role) return current;
-        const now = new Date().toISOString();
-        const next = { ...current, activeUserId: user.id, activeRole: role };
-        return finish(
-          next,
-          audit(
-            current,
-            "session.role_switched",
-            "session",
-            user.id,
-            `Switched the demo workspace to ${role}.`,
-            now,
-            { activeUserId: current.activeUserId, activeRole: current.activeRole },
-            { activeUserId: user.id, activeRole: role },
-          ),
-          now,
-        );
-      });
+        return { ...current, activeUserId: user.id, activeRole: role };
+      }, { persist: false });
     },
     [commit],
   );
 
   const switchUser = useCallback(
     (userId: UUID) => {
-      commit((current) => {
+      void commit((current) => {
         const user = current.users.find((candidate) => candidate.id === userId);
         assert(user && user.status === "active", "That demo user is not active.");
         const role = user.roles.includes(current.activeRole) ? current.activeRole : user.primaryRole;
         if (current.activeUserId === user.id && current.activeRole === role) return current;
-        const now = new Date().toISOString();
-        const next = { ...current, activeUserId: user.id, activeRole: role };
-        return finish(
-          next,
-          audit(
-            current,
-            "session.role_switched",
-            "session",
-            user.id,
-            `Switched the demo user to ${user.displayName}.`,
-            now,
-            { activeUserId: current.activeUserId, activeRole: current.activeRole },
-            { activeUserId: user.id, activeRole: role },
-          ),
-          now,
-        );
-      });
+        return { ...current, activeUserId: user.id, activeRole: role };
+      }, { persist: false });
     },
     [commit],
   );
 
   const switchLocale = useCallback(
     (locale: Locale) => {
-      commit((current) => {
+      void commit((current) => {
         if (current.locale === locale) return current;
-        const now = new Date().toISOString();
-        const users = current.users.map((user) =>
-          user.id === current.activeUserId ? { ...user, locale } : user,
-        );
-        const next = { ...current, locale, users };
-        return finish(
-          next,
-          audit(
-            current,
-            "session.locale_changed",
-            "session",
-            current.activeUserId,
-            `Changed the interface language to ${locale}.`,
-            now,
-            { locale: current.locale },
-            { locale },
-          ),
-          now,
-        );
-      });
+        return { ...current, locale };
+      }, { persist: false });
     },
     [commit],
   );
 
-  const resetDemo = useCallback(() => {
-    commit((current) => {
-      const now = new Date().toISOString();
-      const reset = createSeedState();
-      return finish(
-        { ...reset, updatedAt: now },
-        audit(
-          current,
-          "demo.reset",
-          "demo",
-          reset.activeUserId,
-          "Restored the Cameroon pilot demo data.",
-          now,
-        ),
-        now,
-      );
-    });
-  }, [commit]);
+  const resetDemo = useCallback(async () => {
+    assert(!recoveringRef.current, "The workspace is reloading its database state.");
+    const current = stateRef.current;
+    const now = new Date().toISOString();
+    const reset = overlaySession(
+      { ...createSeedState(), updatedAt: now },
+      current,
+    );
+    const mutationVersion = mutationVersionRef.current + 1;
+    mutationVersionRef.current = mutationVersion;
+    stateRef.current = reset;
+    setState(reset);
+    await enqueueReset(mutationVersion);
+  }, [enqueueReset]);
 
   const createListing = useCallback(
-    (input: CreateListingInput) => {
+    async (input: CreateListingInput) => {
       const id = makeId();
-      commit((current) => {
+      await commit((current) => {
         assertRole(current, ["farmer", "operations", "admin"], "create a supply listing");
         assertPositive(input.availableQuantity, "Available quantity");
         assertFcfa(input.unitPrice, "Unit price");
@@ -446,10 +762,10 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const createDemand = useCallback(
-    (input: CreateDemandInput) => {
+    async (input: CreateDemandInput) => {
       const id = makeId();
       const itemIds = input.items.map(() => makeId());
-      commit((current) => {
+      await commit((current) => {
         assertRole(current, ["buyer", "operations", "admin"], "create a demand request");
         assert(input.title.trim().length >= 3, "Give the demand a short title.");
         assert(input.items.length > 0, "Add at least one product to the demand.");
@@ -545,9 +861,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const submitQuote = useCallback(
-    (input: SubmitQuoteInput) => {
+    async (input: SubmitQuoteInput) => {
       const id = makeId();
-      commit((current) => {
+      await commit((current) => {
         assertRole(current, ["farmer"], "submit a farmer quote");
         assertPositive(input.availableQuantity, "Available quantity");
         assertFcfa(input.unitPrice, "Unit price");
@@ -627,9 +943,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const createAllocation = useCallback(
-    (input: CreateAllocationInput) => {
+    async (input: CreateAllocationInput) => {
       const id = makeId();
-      commit((current) => {
+      await commit((current) => {
         assertRole(current, ["operations", "admin"], "create a fulfilment allocation");
         assertPositive(input.quantity, "Allocation quantity");
         const item = current.demandItems.find((candidate) => candidate.id === input.demandItemId);
@@ -735,9 +1051,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const createOffer = useCallback(
-    (input: CreateOfferInput) => {
+    async (input: CreateOfferInput) => {
       const orderId = makeId();
-      commit((current) => {
+      await commit((current) => {
         assertRole(current, ["operations", "admin"], "create a consolidated offer");
         const demand = current.demands.find((candidate) => candidate.id === input.demandId);
         assert(demand && ["open", "matching", "allocating"].includes(demand.status), "This demand cannot receive another offer.");
@@ -878,8 +1194,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const confirmOrder = useCallback(
-    (orderId: UUID) => {
-      commit((current) => {
+    async (orderId: UUID) => {
+      await commit((current) => {
         assertRole(current, ["buyer", "operations", "admin"], "confirm an order");
         const order = current.orders.find((candidate) => candidate.id === orderId);
         assert(order && order.status === "quoted", "Only a quoted offer can be confirmed.");
@@ -1022,9 +1338,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const confirmPayment = useCallback(
-    (input: ConfirmPaymentInput) => {
+    async (input: ConfirmPaymentInput) => {
       let resultId = makeId();
-      commit((current) => {
+      await commit((current) => {
         assertRole(current, ["buyer", "operations", "admin"], "confirm a payment");
         assert(input.transactionReference.trim().length > 0, "Enter the provider transaction reference.");
         const order = current.orders.find((candidate) => candidate.id === input.orderId);
@@ -1124,8 +1440,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const advanceShipment = useCallback(
-    (shipmentId: UUID) => {
-      commit((current) => {
+    async (shipmentId: UUID) => {
+      await commit((current) => {
         assertRole(current, ["operations", "admin", "transporter"], "advance a shipment");
         const shipment = current.shipments.find((candidate) => candidate.id === shipmentId);
         assert(shipment, "Shipment not found.");
@@ -1238,8 +1554,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const acceptDelivery = useCallback(
-    (orderId: UUID) => {
-      commit((current) => {
+    async (orderId: UUID) => {
+      await commit((current) => {
         assertRole(current, ["buyer", "operations", "admin"], "accept a delivery");
         const order = current.orders.find((candidate) => candidate.id === orderId);
         assert(order?.status === "delivered", "Only a delivered order can be accepted.");
@@ -1305,9 +1621,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const openDispute = useCallback(
-    (input: OpenDisputeInput) => {
+    async (input: OpenDisputeInput) => {
       const id = makeId();
-      commit((current) => {
+      await commit((current) => {
         assertRole(current, ["buyer", "support", "operations", "admin"], "open a dispute");
         const order = current.orders.find((candidate) => candidate.id === input.orderId);
         assert(order && ["delivered", "accepted"].includes(order.status), "A dispute can only be opened after delivery.");
@@ -1399,8 +1715,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const resolveDispute = useCallback(
-    (input: ResolveDisputeInput) => {
-      commit((current) => {
+    async (input: ResolveDisputeInput) => {
+      await commit((current) => {
         assertRole(current, ["support", "operations", "admin"], "resolve a dispute");
         const dispute = current.disputes.find((candidate) => candidate.id === input.disputeId);
         assert(dispute && ["open", "under_review"].includes(dispute.status), "This dispute is not open.");
@@ -1516,8 +1832,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const verifyOrganisation = useCallback(
-    (input: VerifyOrganisationInput) => {
-      commit((current) => {
+    async (input: VerifyOrganisationInput) => {
+      await commit((current) => {
         assertRole(current, ["operations", "admin"], "change organisation verification");
         const organisation = current.organisations.find(
           (candidate) => candidate.id === input.organisationId,
@@ -1606,8 +1922,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
   );
 
   const markNotificationRead = useCallback(
-    (notificationId: UUID) => {
-      commit((current) => {
+    async (notificationId: UUID) => {
+      await commit((current) => {
         const item = current.notifications.find((candidate) => candidate.id === notificationId);
         assert(item, "Notification not found.");
         if (item.readAt) return current;
@@ -1713,6 +2029,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       state,
       hydrated,
       isHydrated: hydrated,
+      isPersisting,
+      loadError,
+      persistenceError,
+      retryHydration,
+      clearPersistenceError,
       currentUser,
       currentOrganisation,
       currentRole: state.activeRole,
@@ -1720,10 +2041,68 @@ export function AppProvider({ children }: { children: ReactNode }) {
       metrics,
       actions,
     }),
-    [actions, currentOrganisation, currentUser, hydrated, metrics, state],
+    [
+      actions,
+      clearPersistenceError,
+      currentOrganisation,
+      currentUser,
+      hydrated,
+      isPersisting,
+      loadError,
+      metrics,
+      persistenceError,
+      retryHydration,
+      state,
+    ],
   );
 
-  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
+  return (
+    <AppContext.Provider value={value}>
+      {isMarketplaceWorkspace && !hydrated && loadError ? (
+        <main className="grid min-h-screen place-items-center bg-[var(--cream)] px-6">
+          <section
+            className="surface w-full max-w-lg p-7 text-center sm:p-9"
+            role="alert"
+            aria-live="assertive"
+          >
+            <p className="eyebrow">Database connection</p>
+            <h1 className="font-display mt-3 text-3xl font-bold text-[var(--forest-strong)]">
+              We could not load your workspace
+            </h1>
+            <p className="mt-4 text-sm leading-6 text-[var(--muted)]">{loadError}</p>
+            <button
+              type="button"
+              onClick={retryHydration}
+              className="mt-6 rounded-xl bg-[var(--forest)] px-5 py-3 text-sm font-extrabold text-white transition hover:bg-[var(--forest-strong)]"
+            >
+              Retry database connection
+            </button>
+          </section>
+        </main>
+      ) : (
+        children
+      )}
+      {isMarketplaceWorkspace && hydrated && persistenceError ? (
+        <div
+          className="fixed inset-x-4 bottom-4 z-[100] mx-auto flex max-w-2xl items-start justify-between gap-4 rounded-2xl border border-red-200 bg-white p-4 text-sm shadow-xl"
+          role="alert"
+          aria-live="assertive"
+        >
+          <div>
+            <p className="font-extrabold text-red-800">Database save failed</p>
+            <p className="mt-1 leading-5 text-red-700">{persistenceError}</p>
+          </div>
+          <button
+            type="button"
+            onClick={clearPersistenceError}
+            className="shrink-0 font-extrabold text-red-800 underline underline-offset-2"
+          >
+            Dismiss
+          </button>
+        </div>
+      ) : null}
+    </AppContext.Provider>
+  );
 }
 
 export function useApp(): AppContextValue {

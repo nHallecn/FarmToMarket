@@ -495,7 +495,8 @@ export function AiCopilot({ role, section }: { role: CopilotRole; section: strin
     window.requestAnimationFrame(() => inputRef.current?.focus());
   };
 
-  const saveDraft = (messageId: string, result: CopilotResult) => {
+  const saveDraft = async (messageId: string, result: CopilotResult) => {
+    if (savingMessageId) return;
     const validation = validateCopilotDraft({
       draft: result.draft,
       products: app.state.products,
@@ -516,7 +517,7 @@ export function AiCopilot({ role, section }: { role: CopilotRole; section: strin
         draft.grade &&
         draft.date
       ) {
-        app.actions.createDemand({
+        await app.actions.createDemand({
           buyerOrganisationId: app.currentOrganisation?.id,
           title: draft.title.trim().slice(0, 120),
           requiredDeliveryDate: draft.date,
@@ -549,7 +550,7 @@ export function AiCopilot({ role, section }: { role: CopilotRole; section: strin
         draft.date &&
         draft.priceFcfa !== null
       ) {
-        app.actions.createListing({
+        await app.actions.createListing({
           farmerOrganisationId: app.currentOrganisation?.id,
           productId: draft.productId,
           availableQuantity: draft.quantity,
@@ -798,7 +799,7 @@ export function AiCopilot({ role, section }: { role: CopilotRole; section: strin
                                     <button type="button" onClick={() => setReviewingMessageId(null)} className="inline-flex min-h-10 items-center justify-center rounded-full border border-[var(--line)] bg-white px-4 text-xs font-black text-[var(--forest)] hover:bg-[var(--cream)]">
                                       {copy.cancel}
                                     </button>
-                                    <button type="button" disabled={savingMessageId === entry.id} onClick={() => saveDraft(entry.id, result)} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-full bg-[var(--forest)] px-4 text-xs font-black text-white hover:bg-[var(--forest-strong)] disabled:opacity-60">
+                                    <button type="button" disabled={savingMessageId !== null} onClick={() => void saveDraft(entry.id, result)} className="inline-flex min-h-10 items-center justify-center gap-2 rounded-full bg-[var(--forest)] px-4 text-xs font-black text-white hover:bg-[var(--forest-strong)] disabled:opacity-60">
                                       {savingMessageId === entry.id ? <LoaderCircle aria-hidden="true" size={15} className="animate-spin" /> : <Check aria-hidden="true" size={15} />}
                                       {savingMessageId === entry.id ? copy.saving : copy.confirmSave}
                                     </button>

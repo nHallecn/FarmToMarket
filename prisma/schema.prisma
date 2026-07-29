@@ -1,0 +1,772 @@
+generator client {
+  provider     = "prisma-client"
+  output       = "../src/generated/prisma"
+  moduleFormat = "esm"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UserRole {
+  farmer
+  buyer
+  operations
+  support
+  admin
+  transporter
+}
+
+enum Locale {
+  en
+  fr
+}
+
+enum AccountStatus {
+  pending
+  active
+  suspended
+  rejected
+}
+
+enum VerificationStatus {
+  pending
+  verified
+  rejected
+  suspended
+}
+
+enum OrganisationType {
+  farmer
+  cooperative
+  buyer
+  platform
+  logistics
+}
+
+enum BuyerType {
+  restaurant
+  hotel
+  retailer
+  caterer
+  wholesaler
+  mini_market
+  processor
+}
+
+enum ProductCategory {
+  fruit
+  vegetable
+  tuber
+  cereal
+  legume
+  spice
+}
+
+enum CommercialUnit {
+  kg
+  tonne
+  bag_50kg
+  crate
+  basket
+  bunch
+  tray
+}
+
+enum ProduceGrade {
+  premium
+  grade_a
+  grade_b
+  standard
+}
+
+enum ListingStatus {
+  draft
+  active
+  paused
+  sold
+  unavailable
+  closed
+}
+
+enum DemandStatus {
+  draft
+  open
+  matching
+  allocating
+  offered
+  fulfilled
+  cancelled
+  expired
+}
+
+enum QuoteStatus {
+  submitted
+  shortlisted
+  accepted
+  declined
+  withdrawn
+}
+
+enum OrderStatus {
+  draft
+  requested
+  quoted
+  confirmed
+  ready_for_pickup
+  in_transit
+  delivered
+  accepted
+  completed
+  disputed
+  cancelled
+  refunded
+}
+
+enum AllocationStatus {
+  proposed
+  confirmed
+  ready_for_pickup
+  picked_up
+  delivered
+  cancelled
+}
+
+enum PaymentProvider {
+  mtn_momo
+  orange_money
+  bank_transfer
+}
+
+enum PaymentStatus {
+  pending
+  processing
+  succeeded
+  failed
+  partially_refunded
+  refunded
+}
+
+enum Currency {
+  XAF
+}
+
+enum ShipmentStatus {
+  planned
+  pickup_scheduled
+  picked_up
+  in_transit
+  delivered
+  exception
+  failed
+}
+
+enum NotificationChannel {
+  in_app
+  sms
+  whatsapp
+  email
+}
+
+enum NotificationType {
+  verification
+  demand_match
+  quote
+  offer
+  order
+  payment
+  pickup
+  delivery
+  dispute
+  cancellation
+  system
+}
+
+enum NotificationStatus {
+  queued
+  sent
+  delivered
+  failed
+  read
+}
+
+enum NotificationEntityType {
+  organisation
+  listing
+  demand
+  quote
+  order
+  payment
+  shipment
+  dispute
+}
+
+enum DisputeReason {
+  quality
+  quantity_shortage
+  late_delivery
+  damaged_goods
+  wrong_product
+  payment
+  other
+}
+
+enum RequestedResolution {
+  replacement
+  partial_refund
+  full_refund
+  credit
+  other
+}
+
+enum DisputeStatus {
+  open
+  under_review
+  resolved
+  partially_resolved
+  rejected
+}
+
+enum AuditAction {
+  session_role_switched             @map("session.role_switched")
+  session_locale_changed            @map("session.locale_changed")
+  demo_reset                        @map("demo.reset")
+  listing_created                   @map("listing.created")
+  demand_created                    @map("demand.created")
+  quote_submitted                   @map("quote.submitted")
+  allocation_created                @map("allocation.created")
+  offer_created                     @map("offer.created")
+  order_confirmed                   @map("order.confirmed")
+  payment_confirmed                 @map("payment.confirmed")
+  shipment_advanced                 @map("shipment.advanced")
+  delivery_accepted                 @map("delivery.accepted")
+  dispute_opened                    @map("dispute.opened")
+  dispute_resolved                  @map("dispute.resolved")
+  organisation_verification_changed @map("organisation.verification_changed")
+  notification_read                 @map("notification.read")
+}
+
+enum AuditTargetType {
+  session
+  demo
+  organisation
+  listing
+  demand
+  quote
+  allocation
+  order
+  payment
+  shipment
+  notification
+  dispute
+}
+
+model AppStateMeta {
+  id            String   @id @default("primary") @db.VarChar(32)
+  schemaVersion Int      @default(1) @map("schema_version")
+  revision      Int      @default(0)
+  updatedAt     DateTime @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  @@map("app_state_meta")
+}
+
+model User {
+  id           String        @id @default(uuid()) @db.Uuid
+  firstName    String        @map("first_name")
+  lastName     String        @map("last_name")
+  displayName  String        @map("display_name")
+  phone        String        @unique
+  email        String?       @unique
+  avatarUrl    String?       @map("avatar_url")
+  primaryRole  UserRole      @map("primary_role")
+  locale       Locale        @default(en)
+  status       AccountStatus @default(pending)
+  lastActiveAt DateTime      @map("last_active_at") @db.Timestamptz(3)
+  createdAt    DateTime      @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt    DateTime      @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  roles                   UserRoleAssignment[]
+  organisationMemberships OrganisationMember[]
+  verifiedOrganisations   Organisation[]         @relation("OrganisationVerifier")
+  createdListings         SupplyListing[]        @relation("ListingCreator")
+  createdDemands          DemandRequest[]        @relation("DemandCreator")
+  submittedQuotes         Quote[]                @relation("QuoteSubmitter")
+  createdOrders           Order[]                @relation("OrderCreator")
+  createdAllocations      FulfilmentAllocation[] @relation("AllocationCreator")
+  verifiedPayments        PaymentTransaction[]   @relation("PaymentVerifier")
+  createdShipments        Shipment[]             @relation("ShipmentCreator")
+  notifications           Notification[]         @relation("NotificationRecipient")
+  openedDisputes          Dispute[]              @relation("DisputeOpener")
+  assignedDisputes        Dispute[]              @relation("DisputeAssignee")
+  resolvedDisputes        Dispute[]              @relation("DisputeResolver")
+  auditLogs               AuditLog[]             @relation("AuditActor")
+
+  @@index([status])
+  @@index([lastActiveAt])
+  @@map("users")
+}
+
+model UserRoleAssignment {
+  userId String   @map("user_id") @db.Uuid
+  role   UserRole
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, role])
+  @@index([role])
+  @@map("user_role_assignments")
+}
+
+model Organisation {
+  id                       String             @id @default(uuid()) @db.Uuid
+  slug                     String             @unique
+  name                     String
+  shortName                String             @map("short_name")
+  type                     OrganisationType
+  buyerType                BuyerType?         @map("buyer_type")
+  description              Json               @db.JsonB
+  contactPerson            String             @map("contact_person")
+  phone                    String
+  email                    String?
+  registrationNumber       String?            @unique @map("registration_number")
+  addresses                Json               @db.JsonB
+  preferredPaymentProvider PaymentProvider?   @map("preferred_payment_provider")
+  maskedPaymentAccount     String?            @map("masked_payment_account")
+  verificationStatus       VerificationStatus @default(pending) @map("verification_status")
+  verifiedAt               DateTime?          @map("verified_at") @db.Timestamptz(3)
+  verifiedById             String?            @map("verified_by_id") @db.Uuid
+  verificationNotes        String?            @map("verification_notes")
+  completedOrders          Int                @default(0) @map("completed_orders")
+  cancellationRate         Float              @default(0) @map("cancellation_rate")
+  averageRating            Float?             @map("average_rating")
+  onTimeDeliveryRate       Float?             @map("on_time_delivery_rate")
+  createdAt                DateTime           @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt                DateTime           @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  verifiedBy        User?                  @relation("OrganisationVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
+  members           OrganisationMember[]
+  produceCategories OrganisationProduct[]
+  supplyListings    SupplyListing[]        @relation("ListingFarmerOrganisation")
+  demandRequests    DemandRequest[]        @relation("DemandBuyerOrganisation")
+  quotes            Quote[]                @relation("QuoteFarmerOrganisation")
+  buyerOrders       Order[]                @relation("OrderBuyerOrganisation")
+  allocations       FulfilmentAllocation[] @relation("AllocationFarmerOrganisation")
+  providedShipments Shipment[]             @relation("ShipmentProviderOrganisation")
+
+  @@index([type, verificationStatus])
+  @@index([verifiedById])
+  @@map("organisations")
+}
+
+model OrganisationMember {
+  organisationId String   @map("organisation_id") @db.Uuid
+  userId         String   @map("user_id") @db.Uuid
+  joinedAt       DateTime @default(now()) @map("joined_at") @db.Timestamptz(3)
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([organisationId, userId])
+  @@index([userId])
+  @@map("organisation_members")
+}
+
+model Product {
+  id           String           @id @default(uuid()) @db.Uuid
+  slug         String           @unique
+  name         Json             @db.JsonB
+  description  Json             @db.JsonB
+  category     ProductCategory
+  defaultUnit  CommercialUnit   @map("default_unit")
+  allowedUnits CommercialUnit[] @default([]) @map("allowed_units")
+  grades       ProduceGrade[]   @default([])
+  imageUrl     String           @map("image_url")
+  accent       String
+  seasonMonths Int[]            @default([]) @map("season_months")
+  active       Boolean          @default(true)
+
+  organisations OrganisationProduct[]
+  listings      SupplyListing[]
+  demandItems   DemandItem[]
+  orderItems    OrderItem[]
+
+  @@index([category, active])
+  @@map("products")
+}
+
+model OrganisationProduct {
+  organisationId String @map("organisation_id") @db.Uuid
+  productId      String @map("product_id") @db.Uuid
+
+  organisation Organisation @relation(fields: [organisationId], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@id([organisationId, productId])
+  @@index([productId])
+  @@map("organisation_products")
+}
+
+model SupplyListing {
+  id                   String         @id @default(uuid()) @db.Uuid
+  reference            String         @unique
+  farmerOrganisationId String         @map("farmer_organisation_id") @db.Uuid
+  createdById          String         @map("created_by_id") @db.Uuid
+  productId            String         @map("product_id") @db.Uuid
+  availableQuantity    Float          @map("available_quantity")
+  reservedQuantity     Float          @default(0) @map("reserved_quantity")
+  unit                 CommercialUnit
+  unitPrice            Int            @map("unit_price")
+  minOrderQuantity     Float          @default(1) @map("min_order_quantity")
+  grade                ProduceGrade
+  location             Json           @db.JsonB
+  availableFrom        DateTime       @map("available_from") @db.Date
+  availableUntil       DateTime       @map("available_until") @db.Date
+  imageUrls            String[]       @default([]) @map("image_urls")
+  notes                String?
+  status               ListingStatus  @default(draft)
+  createdAt            DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  farmerOrganisation Organisation           @relation("ListingFarmerOrganisation", fields: [farmerOrganisationId], references: [id], onDelete: Restrict)
+  createdBy          User                   @relation("ListingCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  product            Product                @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quotes             Quote[]
+  allocations        FulfilmentAllocation[]
+
+  @@index([farmerOrganisationId, status])
+  @@index([productId, status, availableFrom])
+  @@index([createdById])
+  @@map("supply_listings")
+}
+
+model DemandRequest {
+  id                   String       @id @default(uuid()) @db.Uuid
+  reference            String       @unique
+  buyerOrganisationId  String       @map("buyer_organisation_id") @db.Uuid
+  createdById          String       @map("created_by_id") @db.Uuid
+  title                String
+  deliveryAddress      Json         @map("delivery_address") @db.JsonB
+  requiredDeliveryDate DateTime     @map("required_delivery_date") @db.Date
+  recurring            Boolean      @default(false)
+  recurrenceNote       String?      @map("recurrence_note")
+  status               DemandStatus @default(draft)
+  notes                String?
+  submittedAt          DateTime?    @map("submitted_at") @db.Timestamptz(3)
+  createdAt            DateTime     @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime     @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  buyerOrganisation Organisation           @relation("DemandBuyerOrganisation", fields: [buyerOrganisationId], references: [id], onDelete: Restrict)
+  createdBy         User                   @relation("DemandCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  items             DemandItem[]
+  orders            Order[]
+  allocations       FulfilmentAllocation[]
+
+  @@index([buyerOrganisationId, status])
+  @@index([status, requiredDeliveryDate])
+  @@index([createdById])
+  @@map("demand_requests")
+}
+
+model DemandItem {
+  id              String         @id @default(uuid()) @db.Uuid
+  demandId        String         @map("demand_id") @db.Uuid
+  productId       String         @map("product_id") @db.Uuid
+  quantity        Float
+  unit            CommercialUnit
+  grade           ProduceGrade
+  targetUnitPrice Int?           @map("target_unit_price")
+  notes           String?
+
+  demand      DemandRequest          @relation(fields: [demandId], references: [id], onDelete: Cascade)
+  product     Product                @relation(fields: [productId], references: [id], onDelete: Restrict)
+  quotes      Quote[]
+  orderItems  OrderItem[]
+  allocations FulfilmentAllocation[]
+
+  @@index([demandId])
+  @@index([productId, grade])
+  @@map("demand_items")
+}
+
+model Quote {
+  id                   String         @id @default(uuid()) @db.Uuid
+  reference            String         @unique
+  demandItemId         String         @map("demand_item_id") @db.Uuid
+  farmerOrganisationId String         @map("farmer_organisation_id") @db.Uuid
+  submittedById        String         @map("submitted_by_id") @db.Uuid
+  sourceListingId      String?        @map("source_listing_id") @db.Uuid
+  availableQuantity    Float          @map("available_quantity")
+  unit                 CommercialUnit
+  unitPrice            Int            @map("unit_price")
+  availableDate        DateTime       @map("available_date") @db.Date
+  notes                String?
+  status               QuoteStatus    @default(submitted)
+  submittedAt          DateTime       @default(now()) @map("submitted_at") @db.Timestamptz(3)
+  updatedAt            DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  demandItem         DemandItem             @relation(fields: [demandItemId], references: [id], onDelete: Restrict)
+  farmerOrganisation Organisation           @relation("QuoteFarmerOrganisation", fields: [farmerOrganisationId], references: [id], onDelete: Restrict)
+  submittedBy        User                   @relation("QuoteSubmitter", fields: [submittedById], references: [id], onDelete: Restrict)
+  sourceListing      SupplyListing?         @relation(fields: [sourceListingId], references: [id], onDelete: SetNull)
+  allocations        FulfilmentAllocation[]
+
+  @@index([demandItemId, status])
+  @@index([farmerOrganisationId, status])
+  @@index([sourceListingId])
+  @@index([submittedById])
+  @@map("quotes")
+}
+
+model Order {
+  id                  String          @id @default(uuid()) @db.Uuid
+  reference           String          @unique
+  demandId            String?         @map("demand_id") @db.Uuid
+  buyerOrganisationId String          @map("buyer_organisation_id") @db.Uuid
+  createdById         String          @map("created_by_id") @db.Uuid
+  deliveryAddress     Json            @map("delivery_address") @db.JsonB
+  deliveryDate        DateTime        @map("delivery_date") @db.Date
+  status              OrderStatus     @default(draft)
+  subtotal            Int
+  serviceFee          Int             @map("service_fee")
+  deliveryFee         Int             @map("delivery_fee")
+  total               Int
+  currency            Currency        @default(XAF)
+  paymentStatus       PaymentStatus   @default(pending) @map("payment_status")
+  shipmentStatus      ShipmentStatus? @map("shipment_status")
+  buyerNote           String?         @map("buyer_note")
+  operationsNote      String?         @map("operations_note")
+  quotedAt            DateTime?       @map("quoted_at") @db.Timestamptz(3)
+  confirmedAt         DateTime?       @map("confirmed_at") @db.Timestamptz(3)
+  deliveredAt         DateTime?       @map("delivered_at") @db.Timestamptz(3)
+  acceptedAt          DateTime?       @map("accepted_at") @db.Timestamptz(3)
+  completedAt         DateTime?       @map("completed_at") @db.Timestamptz(3)
+  cancelledAt         DateTime?       @map("cancelled_at") @db.Timestamptz(3)
+  createdAt           DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt           DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  demand            DemandRequest?         @relation(fields: [demandId], references: [id], onDelete: SetNull)
+  buyerOrganisation Organisation           @relation("OrderBuyerOrganisation", fields: [buyerOrganisationId], references: [id], onDelete: Restrict)
+  createdBy         User                   @relation("OrderCreator", fields: [createdById], references: [id], onDelete: Restrict)
+  items             OrderItem[]
+  allocations       FulfilmentAllocation[]
+  payments          PaymentTransaction[]
+  shipments         Shipment[]
+  disputes          Dispute[]
+
+  @@index([buyerOrganisationId, status])
+  @@index([demandId])
+  @@index([status, deliveryDate])
+  @@index([paymentStatus])
+  @@index([createdById])
+  @@map("orders")
+}
+
+model OrderItem {
+  id                String         @id @default(uuid()) @db.Uuid
+  orderId           String         @map("order_id") @db.Uuid
+  demandItemId      String?        @map("demand_item_id") @db.Uuid
+  productId         String         @map("product_id") @db.Uuid
+  quantity          Float
+  allocatedQuantity Float          @map("allocated_quantity")
+  unit              CommercialUnit
+  grade             ProduceGrade
+  unitPrice         Int            @map("unit_price")
+  lineTotal         Int            @map("line_total")
+
+  order       Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  demandItem  DemandItem?            @relation(fields: [demandItemId], references: [id], onDelete: SetNull)
+  product     Product                @relation(fields: [productId], references: [id], onDelete: Restrict)
+  allocations FulfilmentAllocation[]
+  disputes    DisputeAffectedItem[]
+
+  @@index([orderId])
+  @@index([demandItemId])
+  @@index([productId])
+  @@map("order_items")
+}
+
+model FulfilmentAllocation {
+  id                   String           @id @default(uuid()) @db.Uuid
+  demandId             String           @map("demand_id") @db.Uuid
+  demandItemId         String           @map("demand_item_id") @db.Uuid
+  orderId              String?          @map("order_id") @db.Uuid
+  orderItemId          String?          @map("order_item_id") @db.Uuid
+  quoteId              String?          @map("quote_id") @db.Uuid
+  sourceListingId      String?          @map("source_listing_id") @db.Uuid
+  farmerOrganisationId String           @map("farmer_organisation_id") @db.Uuid
+  quantity             Float
+  unit                 CommercialUnit
+  farmerUnitPrice      Int              @map("farmer_unit_price")
+  farmerTotal          Int              @map("farmer_total")
+  status               AllocationStatus @default(proposed)
+  pickupAddress        Json             @map("pickup_address") @db.JsonB
+  pickupWindow         String?          @map("pickup_window")
+  farmerNote           String?          @map("farmer_note")
+  operationsNote       String?          @map("operations_note")
+  createdById          String           @map("created_by_id") @db.Uuid
+  createdAt            DateTime         @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt            DateTime         @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  demand             DemandRequest  @relation(fields: [demandId], references: [id], onDelete: Restrict)
+  demandItem         DemandItem     @relation(fields: [demandItemId], references: [id], onDelete: Restrict)
+  order              Order?         @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  orderItem          OrderItem?     @relation(fields: [orderItemId], references: [id], onDelete: SetNull)
+  quote              Quote?         @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+  sourceListing      SupplyListing? @relation(fields: [sourceListingId], references: [id], onDelete: SetNull)
+  farmerOrganisation Organisation   @relation("AllocationFarmerOrganisation", fields: [farmerOrganisationId], references: [id], onDelete: Restrict)
+  createdBy          User           @relation("AllocationCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([demandId, status])
+  @@index([demandItemId, status])
+  @@index([orderId])
+  @@index([orderItemId])
+  @@index([quoteId])
+  @@index([sourceListingId])
+  @@index([farmerOrganisationId, status])
+  @@index([createdById])
+  @@map("fulfilment_allocations")
+}
+
+model PaymentTransaction {
+  id                   String          @id @default(uuid()) @db.Uuid
+  orderId              String          @map("order_id") @db.Uuid
+  provider             PaymentProvider
+  transactionReference String          @unique @map("transaction_reference")
+  amount               Int
+  currency             Currency        @default(XAF)
+  status               PaymentStatus   @default(pending)
+  payerMaskedAccount   String?         @map("payer_masked_account")
+  providerEventId      String?         @unique @map("provider_event_id")
+  failureReason        String?         @map("failure_reason")
+  verifiedById         String?         @map("verified_by_id") @db.Uuid
+  verifiedAt           DateTime?       @map("verified_at") @db.Timestamptz(3)
+  initiatedAt          DateTime        @default(now()) @map("initiated_at") @db.Timestamptz(3)
+  completedAt          DateTime?       @map("completed_at") @db.Timestamptz(3)
+  updatedAt            DateTime        @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  order      Order @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  verifiedBy User? @relation("PaymentVerifier", fields: [verifiedById], references: [id], onDelete: SetNull)
+
+  @@index([orderId, status])
+  @@index([provider, status])
+  @@index([verifiedById])
+  @@map("payment_transactions")
+}
+
+model Shipment {
+  id                     String         @id @default(uuid()) @db.Uuid
+  reference              String         @unique
+  orderId                String         @map("order_id") @db.Uuid
+  providerOrganisationId String?        @map("provider_organisation_id") @db.Uuid
+  transporterName        String         @map("transporter_name")
+  transporterPhone       String         @map("transporter_phone")
+  vehicleDetails         String?        @map("vehicle_details")
+  driverName             String?        @map("driver_name")
+  pickupStops            Json           @map("pickup_stops") @db.JsonB
+  deliveryAddress        Json           @map("delivery_address") @db.JsonB
+  plannedPickupAt        DateTime?      @map("planned_pickup_at") @db.Timestamptz(3)
+  expectedDeliveryAt     DateTime?      @map("expected_delivery_at") @db.Timestamptz(3)
+  status                 ShipmentStatus @default(planned)
+  exceptionNote          String?        @map("exception_note")
+  deliveredAt            DateTime?      @map("delivered_at") @db.Timestamptz(3)
+  createdById            String         @map("created_by_id") @db.Uuid
+  createdAt              DateTime       @default(now()) @map("created_at") @db.Timestamptz(3)
+  updatedAt              DateTime       @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  order                Order         @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  providerOrganisation Organisation? @relation("ShipmentProviderOrganisation", fields: [providerOrganisationId], references: [id], onDelete: SetNull)
+  createdBy            User          @relation("ShipmentCreator", fields: [createdById], references: [id], onDelete: Restrict)
+
+  @@index([orderId, status])
+  @@index([providerOrganisationId])
+  @@index([status, expectedDeliveryAt])
+  @@index([createdById])
+  @@map("shipments")
+}
+
+model Notification {
+  id               String                  @id @default(uuid()) @db.Uuid
+  recipientUserId  String                  @map("recipient_user_id") @db.Uuid
+  type             NotificationType
+  title            Json                    @db.JsonB
+  message          Json                    @db.JsonB
+  channels         NotificationChannel[]   @default([])
+  status           NotificationStatus      @default(queued)
+  entityType       NotificationEntityType? @map("entity_type")
+  entityId         String?                 @map("entity_id") @db.Uuid
+  deduplicationKey String                  @unique @map("deduplication_key")
+  readAt           DateTime?               @map("read_at") @db.Timestamptz(3)
+  createdAt        DateTime                @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  recipient User @relation("NotificationRecipient", fields: [recipientUserId], references: [id], onDelete: Cascade)
+
+  @@index([recipientUserId, readAt])
+  @@index([recipientUserId, status, createdAt])
+  @@index([entityType, entityId])
+  @@map("notifications")
+}
+
+model Dispute {
+  id                  String              @id @default(uuid()) @db.Uuid
+  reference           String              @unique
+  orderId             String              @map("order_id") @db.Uuid
+  openedById          String              @map("opened_by_id") @db.Uuid
+  reason              DisputeReason
+  description         String
+  affectedQuantity    Float?              @map("affected_quantity")
+  requestedResolution RequestedResolution @map("requested_resolution")
+  status              DisputeStatus       @default(open)
+  evidence            Json                @db.JsonB
+  assignedToId        String?             @map("assigned_to_id") @db.Uuid
+  investigationNote   String?             @map("investigation_note")
+  resolution          String?
+  financialAdjustment Int                 @default(0) @map("financial_adjustment")
+  resolvedById        String?             @map("resolved_by_id") @db.Uuid
+  resolvedAt          DateTime?           @map("resolved_at") @db.Timestamptz(3)
+  openedAt            DateTime            @default(now()) @map("opened_at") @db.Timestamptz(3)
+  updatedAt           DateTime            @updatedAt @map("updated_at") @db.Timestamptz(3)
+
+  order         Order                 @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  openedBy      User                  @relation("DisputeOpener", fields: [openedById], references: [id], onDelete: Restrict)
+  assignedTo    User?                 @relation("DisputeAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  resolvedBy    User?                 @relation("DisputeResolver", fields: [resolvedById], references: [id], onDelete: SetNull)
+  affectedItems DisputeAffectedItem[]
+
+  @@index([orderId, status])
+  @@index([openedById])
+  @@index([assignedToId, status])
+  @@index([resolvedById])
+  @@map("disputes")
+}
+
+model DisputeAffectedItem {
+  disputeId   String @map("dispute_id") @db.Uuid
+  orderItemId String @map("order_item_id") @db.Uuid
+
+  dispute   Dispute   @relation(fields: [disputeId], references: [id], onDelete: Cascade)
+  orderItem OrderItem @relation(fields: [orderItemId], references: [id], onDelete: Restrict)
+
+  @@id([disputeId, orderItemId])
+  @@index([orderItemId])
+  @@map("dispute_affected_items")
+}
+
+model AuditLog {
+  id          String          @id @default(uuid()) @db.Uuid
+  actorUserId String          @map("actor_user_id") @db.Uuid
+  actorRole   UserRole        @map("actor_role")
+  action      AuditAction
+  targetType  AuditTargetType @map("target_type")
+  targetId    String          @map("target_id") @db.Uuid
+  summary     String
+  before      Json?           @db.JsonB
+  after       Json?           @db.JsonB
+  createdAt   DateTime        @default(now()) @map("created_at") @db.Timestamptz(3)
+
+  actor User @relation("AuditActor", fields: [actorUserId], references: [id], onDelete: Restrict)
+
+  @@index([actorUserId, createdAt])
+  @@index([targetType, targetId, createdAt])
+  @@index([action, createdAt])
+  @@map("audit_logs")
+}

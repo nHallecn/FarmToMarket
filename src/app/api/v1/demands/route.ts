@@ -8,12 +8,26 @@ import {
 } from "@/lib/api-helpers";
 import type {
   Address,
+  AuditLog,
   CommercialUnit,
   DemandItem,
   DemandRequest,
+  DomainState,
+  Notification,
   ProduceGrade,
 } from "@/lib/domain";
-import { createSeedState } from "@/lib/seed-data";
+import {
+  loadDomainState,
+  replaceDomainState,
+} from "@/server/db/state-repository";
+import {
+  isSameOrigin,
+  parseBoundedJsonBody,
+  stateRouteError,
+} from "@/server/db/state-http";
+
+export const dynamic = "force-dynamic";
+const MAX_DEMAND_BODY_BYTES = 64 * 1024;
 
 function trimmedString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
@@ -78,18 +92,29 @@ function validateAddress(value: unknown, errors: FieldErrors) {
 
 export async function POST(request: Request) {
   const requestId = getRequestId(request);
-  let body: unknown;
-
-  try {
-    body = await request.json();
-  } catch {
+  if (!isSameOrigin(request)) {
     return errorResponse({
-      status: 400,
-      code: "INVALID_JSON",
-      message: "The request body must contain valid JSON.",
+      status: 403,
+      code: "ORIGIN_FORBIDDEN",
+      message: "Demand creation must originate from this application.",
       requestId,
     });
   }
+
+  const parsed = await parseBoundedJsonBody(
+    request,
+    MAX_DEMAND_BODY_BYTES,
+  );
+  if (!parsed.ok) {
+    return errorResponse({
+      status: parsed.status,
+      code: parsed.code,
+      message: parsed.message,
+      fieldErrors: parsed.fieldErrors,
+      requestId,
+    });
+  }
+  const body = parsed.value;
 
   if (!isRecord(body)) {
     return errorResponse({
@@ -101,7 +126,12 @@ export async function POST(request: Request) {
     });
   }
 
-  const state = createSeedState();
+  let state: DomainState;
+  try {
+    state = await loadDomainState();
+  } catch (error) {
+    return stateRouteError(error, requestId);
+  }
   const errors: FieldErrors = {};
   const title = trimmedString(body.title);
   const buyerOrganisationId = trimmedString(body.buyerOrganisationId);
@@ -109,6 +139,12 @@ export async function POST(request: Request) {
   const buyer = state.organisations.find(
     (organisation) => organisation.id === buyerOrganisationId,
   );
+  const buyerCreator = buyer?.memberUserIds
+    .map((userId) => state.users.find(({ id }) => id === userId))
+    .find(
+      (user) =>
+        user?.status === "active" && user.roles.includes("buyer"),
+    );
 
   if (!title) {
     addFieldError(errors, "title", "Title is required.");
@@ -124,11 +160,11 @@ export async function POST(request: Request) {
       "buyerOrganisationId",
       "Must identify a buyer organisation in the demo dataset.",
     );
-  } else if (!buyer.memberUserIds[0]) {
+  } else if (!buyerCreator) {
     addFieldError(
       errors,
       "buyerOrganisationId",
-      "The buyer organisation has no member who can create demand.",
+      "The buyer organisation has no active buyer who can create demand.",
     );
   }
 
@@ -259,7 +295,7 @@ export async function POST(request: Request) {
     });
   }
 
-  if (!buyer || !Array.isArray(body.items)) {
+  if (!buyer || !buyerCreator || !Array.isArray(body.items)) {
     return errorResponse({
       status: 500,
       code: "DEMO_STATE_ERROR",
@@ -315,7 +351,7 @@ export async function POST(request: Request) {
     id: demandId,
     reference: `DM-DEMO-${demandId.slice(0, 8).toUpperCase()}`,
     buyerOrganisationId: buyer.id,
-    createdBy: buyer.memberUserIds[0],
+    createdBy: buyerCreator.id,
     title,
     deliveryAddress,
     requiredDeliveryDate,
@@ -328,16 +364,85 @@ export async function POST(request: Request) {
     createdAt: now,
     updatedAt: now,
   };
-
-  return dataResponse(
-    {
-      demand,
-      items,
-      demo: true,
-      persisted: false,
-      notice:
-        "This response demonstrates the V1 contract. It was validated but not persisted.",
-    },
-    { status: 201, requestId },
+  const farmerRecipients = submit
+    ? state.users.filter(
+        (user) =>
+          user.status === "active" &&
+          user.roles.includes("farmer") &&
+          user.organisationIds.some((organisationId) => {
+            const farmer = state.organisations.find(
+              ({ id }) => id === organisationId,
+            );
+            return farmer?.produceCategoryIds.some((productId) =>
+              items.some((item) => item.productId === productId),
+            );
+          }),
+      )
+    : [];
+  const notifications: Notification[] = farmerRecipients.map(
+    (user) => ({
+      id: crypto.randomUUID(),
+      recipientUserId: user.id,
+      type: "demand_match",
+      title: {
+        en: "New buyer demand",
+        fr: "Nouvelle demande acheteur",
+      },
+      message: {
+        en: `${buyer.shortName} posted ${demand.title}.`,
+        fr: `${buyer.shortName} a publie ${demand.title}.`,
+      },
+      channels: ["in_app"],
+      status: "delivered",
+      entityType: "demand",
+      entityId: demand.id,
+      deduplicationKey: `demand_match:${demand.id}:${user.id}`,
+      createdAt: now,
+    }),
   );
+  const auditEvent: AuditLog = {
+    id: crypto.randomUUID(),
+    actorUserId: buyerCreator.id,
+    actorRole: "buyer",
+    action: "demand.created",
+    targetType: "demand",
+    targetId: demand.id,
+    summary: `Created demand ${demand.reference} with ${items.length} item${
+      items.length === 1 ? "" : "s"
+    }.`,
+    after: {
+      status: demand.status,
+      itemCount: items.length,
+    },
+    createdAt: now,
+  };
+
+  try {
+    const persistedState = await replaceDomainState(
+      {
+        ...state,
+        demands: [...state.demands, demand],
+        demandItems: [...state.demandItems, ...items],
+        notifications: [...notifications, ...state.notifications],
+        audits: [auditEvent, ...state.audits],
+        updatedAt: now,
+      },
+      { expectedUpdatedAt: state.updatedAt },
+    );
+    return dataResponse(
+      {
+        demand:
+          persistedState.demands.find(({ id }) => id === demand.id) ??
+          demand,
+        items: persistedState.demandItems.filter(
+          ({ demandId }) => demandId === demand.id,
+        ),
+        notificationsCreated: notifications.length,
+        persisted: true,
+      },
+      { status: 201, requestId },
+    );
+  } catch (error) {
+    return stateRouteError(error, requestId);
+  }
 }

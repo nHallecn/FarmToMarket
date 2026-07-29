@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type ReactNode } from "react";
+import { useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import {
   Activity,
@@ -53,7 +53,7 @@ import {
 } from "@/lib/domain";
 
 type AppContext = ReturnType<typeof useApp>;
-type RunAction = (message: string, task: () => void) => void;
+type RunAction = (message: string, task: () => Promise<unknown>) => Promise<void>;
 type Notice = { kind: "success" | "error"; message: string } | null;
 
 const sectionCopy: Record<string, { eyebrow: string; title: string; description: string }> = {
@@ -388,18 +388,23 @@ function queueState(app: AppContext) {
 export function OperationsWorkspace({ section }: { section: string }) {
   const app = useApp();
   const [notice, setNotice] = useState<Notice>(null);
+  const actionPendingRef = useRef(false);
   const activeSection = sectionCopy[section] ? section : "dashboard";
   const copy = sectionCopy[activeSection];
 
-  const runAction: RunAction = (message, task) => {
+  const runAction: RunAction = async (message, task) => {
+    if (actionPendingRef.current) return;
+    actionPendingRef.current = true;
     try {
-      task();
+      await task();
       setNotice({ kind: "success", message });
     } catch (error) {
       setNotice({
         kind: "error",
         message: error instanceof Error ? error.message : "That action could not be completed.",
       });
+    } finally {
+      actionPendingRef.current = false;
     }
   };
 
@@ -448,7 +453,7 @@ export function OperationsWorkspace({ section }: { section: string }) {
             <ActionButton
               icon={RefreshCcw}
               variant="secondary"
-              onClick={() => runAction("Demo data restored to its starting state.", app.actions.resetDemo)}
+              onClick={() => void runAction("Demo data restored to its starting state.", app.actions.resetDemo)}
             >
               Reset demo
             </ActionButton>
@@ -690,7 +695,7 @@ function VerificationsSection({ app, runAction }: { app: AppContext; runAction: 
 
   const decide = (organisationId: string, status: VerificationStatus) => {
     const organisation = getOrganisation(state, organisationId);
-    runAction(
+    void runAction(
       `${organisation?.shortName ?? "Organisation"} marked ${label(status).toLowerCase()}.`,
       () => actions.verifyOrganisation({ organisationId, status, notes: notes[organisationId]?.trim() || undefined }),
     );
@@ -914,14 +919,16 @@ function FulfilmentSection({ app, runAction }: { app: AppContext; runAction: Run
     .filter((demand) => ["open", "matching", "allocating", "offered"].includes(demand.status))
     .sort((a, b) => a.requiredDeliveryDate.localeCompare(b.requiredDeliveryDate));
 
-  const allocate = (item: DemandItem) => {
+  const allocate = async (item: DemandItem) => {
     const alreadyAllocated = countAllocated(state, item.id);
     const remaining = Math.max(0, item.quantity - alreadyAllocated);
     const candidate = candidateForItem(state, item);
-    if (!candidate || remaining <= 0) return;
+    if (!candidate || remaining <= 0) {
+      throw new Error("No eligible supply is available for this demand item.");
+    }
     const allocatedQuantity = Math.min(remaining, candidate.available);
     if (candidate.kind === "quote") {
-      actions.createAllocation({
+      await actions.createAllocation({
         demandItemId: item.id,
         quoteId: candidate.quote.id,
         sourceListingId: candidate.quote.sourceListingId,
@@ -931,7 +938,7 @@ function FulfilmentSection({ app, runAction }: { app: AppContext; runAction: Run
         operationsNote: "Allocated from the operations fulfilment builder.",
       });
     } else {
-      actions.createAllocation({
+      await actions.createAllocation({
         demandItemId: item.id,
         sourceListingId: candidate.listing.id,
         farmerOrganisationId: candidate.listing.farmerOrganisationId,
@@ -942,7 +949,7 @@ function FulfilmentSection({ app, runAction }: { app: AppContext; runAction: Run
     }
   };
 
-  const sendOffer = (demand: DemandRequest) => {
+  const sendOffer = async (demand: DemandRequest) => {
     const allocationIds = state.allocations
       .filter(
         (allocation) =>
@@ -951,7 +958,7 @@ function FulfilmentSection({ app, runAction }: { app: AppContext; runAction: Run
           allocation.status === "proposed",
       )
       .map((allocation) => allocation.id);
-    actions.createOffer({
+    await actions.createOffer({
       demandId: demand.id,
       allocationIds,
       deliveryFee: 25_000,
@@ -1094,7 +1101,7 @@ function FulfilmentSection({ app, runAction }: { app: AppContext; runAction: Run
                           icon={remaining <= 0 ? Check : Sparkles}
                           disabled={remaining <= 0 || !candidate}
                           onClick={() =>
-                            runAction(
+                            void runAction(
                               `${product ? localise(product.name, locale) : "Demand item"} allocation added.`,
                               () => allocate(item),
                             )
@@ -1124,7 +1131,7 @@ function FulfilmentSection({ app, runAction }: { app: AppContext; runAction: Run
                     icon={FileCheck2}
                     disabled={!fullCoverage || offerAlreadySent}
                     onClick={() =>
-                      runAction(`Consolidated offer created for ${demand.reference}.`, () => sendOffer(demand))
+                      void runAction(`Consolidated offer created for ${demand.reference}.`, () => sendOffer(demand))
                     }
                   >
                     {offerAlreadySent ? "Offer sent" : "Create consolidated offer"}
@@ -1470,7 +1477,7 @@ function LogisticsSection({ app, runAction }: { app: AppContext; runAction: RunA
                   <ActionButton
                     icon={canAdvance ? ArrowRight : CheckCircle2}
                     disabled={!canAdvance}
-                    onClick={() => runAction(`${shipment.reference} moved to its next milestone.`, () => actions.advanceShipment(shipment.id))}
+                    onClick={() => void runAction(`${shipment.reference} moved to its next milestone.`, () => actions.advanceShipment(shipment.id))}
                   >
                     {shipmentNext[shipment.status]}
                   </ActionButton>
@@ -1509,7 +1516,7 @@ function PaymentsSection({ app, runAction }: { app: AppContext; runAction: RunAc
     .filter((payment) => ["succeeded", "partially_refunded"].includes(payment.status))
     .reduce((sum, payment) => sum + payment.amount, 0);
 
-  const confirmTransfer = (order: Order) => {
+  const confirmTransfer = async (order: Order) => {
     const existing = state.payments.find(
       (payment) => payment.orderId === order.id && ["pending", "processing"].includes(payment.status),
     );
@@ -1518,7 +1525,7 @@ function PaymentsSection({ app, runAction }: { app: AppContext; runAction: RunAc
     );
     const transactionReference = references[order.id]?.trim() || existing?.transactionReference;
     if (!transactionReference) throw new Error("Enter the verified provider or bank reference first.");
-    actions.confirmPayment({
+    await actions.confirmPayment({
       orderId: order.id,
       provider: existing?.provider ?? latestAttempt?.provider ?? "bank_transfer",
       transactionReference,
@@ -1587,7 +1594,7 @@ function PaymentsSection({ app, runAction }: { app: AppContext; runAction: RunAc
                           ? undefined
                           : "Enter the verified payment reference first."
                       }
-                      onClick={() => runAction(`Payment confirmed for ${order.reference}.`, () => confirmTransfer(order))}
+                      onClick={() => void runAction(`Payment confirmed for ${order.reference}.`, () => confirmTransfer(order))}
                     >
                       Verify transfer
                     </ActionButton>
@@ -1660,14 +1667,14 @@ function DisputesSection({ app, runAction }: { app: AppContext; runAction: RunAc
       return sum + (order?.total ?? 0);
     }, 0);
 
-  const resolve = (
+  const resolve = async (
     dispute: Dispute,
     status: "resolved" | "partially_resolved" | "rejected",
   ) => {
     const note = notes[dispute.id]?.trim();
     const order = getOrder(state, dispute.orderId);
     const partialAdjustment = status === "partially_resolved" ? Math.round((order?.total ?? 0) * 0.1) : 0;
-    actions.resolveDispute({
+    await actions.resolveDispute({
       disputeId: dispute.id,
       status,
       resolution:
@@ -1749,9 +1756,9 @@ function DisputesSection({ app, runAction }: { app: AppContext; runAction: RunAc
                           className="mt-2 w-full resize-none rounded-xl border border-[var(--line)] bg-white px-3 py-2.5 text-sm outline-none placeholder:text-[var(--muted)]/70 focus:border-[var(--forest)]"
                         />
                         <div className="mt-3 flex flex-wrap gap-2">
-                          <ActionButton icon={CheckCircle2} onClick={() => runAction(`${dispute.reference} resolved.`, () => resolve(dispute, "resolved"))}>Resolve</ActionButton>
-                          <ActionButton icon={CircleDollarSign} variant="secondary" onClick={() => runAction(`${dispute.reference} partially resolved with an adjustment.`, () => resolve(dispute, "partially_resolved"))}>Partial adjustment</ActionButton>
-                          <ActionButton icon={XCircle} variant="danger" onClick={() => runAction(`${dispute.reference} claim rejected.`, () => resolve(dispute, "rejected"))}>Reject claim</ActionButton>
+                          <ActionButton icon={CheckCircle2} onClick={() => void runAction(`${dispute.reference} resolved.`, () => resolve(dispute, "resolved"))}>Resolve</ActionButton>
+                          <ActionButton icon={CircleDollarSign} variant="secondary" onClick={() => void runAction(`${dispute.reference} partially resolved with an adjustment.`, () => resolve(dispute, "partially_resolved"))}>Partial adjustment</ActionButton>
+                          <ActionButton icon={XCircle} variant="danger" onClick={() => void runAction(`${dispute.reference} claim rejected.`, () => resolve(dispute, "rejected"))}>Reject claim</ActionButton>
                         </div>
                       </>
                     ) : (

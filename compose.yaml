@@ -1,0 +1,21 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: farmtomarket
+      POSTGRES_USER: farmtomarket
+      POSTGRES_PASSWORD: farmtomarket_dev
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U farmtomarket -d farmtomarket"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+    volumes:
+      - farmtomarket_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  farmtomarket_postgres_data:

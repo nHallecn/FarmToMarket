@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowRight,
@@ -96,6 +96,7 @@ function DemandForm({ onClose, initialProductId }: { onClose: () => void; initia
   const [recurring, setRecurring] = useState(false);
   const [notes, setNotes] = useState("");
   const [error, setError] = useState("");
+  const [pending, setPending] = useState(false);
   const [lines, setLines] = useState<DemandLineDraft[]>([
     { key: 1, productId: firstProduct, quantity: 100, unit: "kg", grade: "grade_a", targetUnitPrice: 650 },
   ]);
@@ -104,10 +105,13 @@ function DemandForm({ onClose, initialProductId }: { onClose: () => void; initia
     setLines((current) => current.map((line) => (line.key === key ? { ...line, ...patch } : line)));
   };
 
-  const submit = (event: React.FormEvent) => {
+  const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (pending) return;
+    setPending(true);
+    setError("");
     try {
-      actions.createDemand({
+      await actions.createDemand({
         title,
         requiredDeliveryDate: date,
         items: lines.map((line) => ({
@@ -126,6 +130,8 @@ function DemandForm({ onClose, initialProductId }: { onClose: () => void; initia
       onClose();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Unable to create demand.");
+    } finally {
+      setPending(false);
     }
   };
 
@@ -204,8 +210,8 @@ function DemandForm({ onClose, initialProductId }: { onClose: () => void; initia
       </div>
       {error ? <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p> : null}
       <div className="flex flex-col-reverse gap-3 sm:flex-row sm:justify-end">
-        <button type="button" onClick={onClose} className={secondaryButtonClass}>Cancel</button>
-        <button type="submit" className={primaryButtonClass}><ShoppingBasket aria-hidden="true" size={17} /> Publish demand</button>
+        <button type="button" disabled={pending} onClick={onClose} className={secondaryButtonClass}>Cancel</button>
+        <button type="submit" disabled={pending} className={primaryButtonClass}><ShoppingBasket aria-hidden="true" size={17} /> {pending ? "Publishing…" : "Publish demand"}</button>
       </div>
     </form>
   );
@@ -216,12 +222,20 @@ function PaymentForm({ order, onClose }: { order: Order; onClose: () => void }) 
   const [provider, setProvider] = useState<PaymentProvider>("mtn_momo");
   const [reference, setReference] = useState(`FTM-${order.reference.slice(-4)}-DEMO`);
   const [error, setError] = useState("");
-  const submit = (event: React.FormEvent) => {
+  const [pending, setPending] = useState(false);
+  const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (pending) return;
+    setPending(true);
+    setError("");
     try {
-      actions.confirmPayment({ orderId: order.id, provider, transactionReference: reference, amount: order.total, payerMaskedAccount: "+237 6•• •• 41 08" });
+      await actions.confirmPayment({ orderId: order.id, provider, transactionReference: reference, amount: order.total, payerMaskedAccount: "+237 6•• •• 41 08" });
       onClose();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Payment could not be confirmed."); }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Payment could not be confirmed.");
+    } finally {
+      setPending(false);
+    }
   };
   return (
     <form onSubmit={submit} className="space-y-5">
@@ -239,7 +253,7 @@ function PaymentForm({ order, onClose }: { order: Order; onClose: () => void }) 
         <input className={inputClass} value={reference} onChange={(event) => setReference(event.target.value)} required minLength={5} />
       </Field>
       {error ? <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p> : null}
-      <button className={`${primaryButtonClass} w-full`} type="submit"><ShieldCheck aria-hidden="true" size={17} /> Confirm sandbox payment</button>
+      <button className={`${primaryButtonClass} w-full`} type="submit" disabled={pending}><ShieldCheck aria-hidden="true" size={17} /> {pending ? "Confirming…" : "Confirm sandbox payment"}</button>
     </form>
   );
 }
@@ -250,12 +264,20 @@ function DisputeForm({ order, onClose }: { order: Order; onClose: () => void }) 
   const [resolution, setResolution] = useState<RequestedResolution>("partial_refund");
   const [description, setDescription] = useState("");
   const [error, setError] = useState("");
-  const submit = (event: React.FormEvent) => {
+  const [pending, setPending] = useState(false);
+  const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (pending) return;
+    setPending(true);
+    setError("");
     try {
-      actions.openDispute({ orderId: order.id, reason, requestedResolution: resolution, description, evidence: [{ kind: "note", description: "Buyer submitted written evidence in demo." }] });
+      await actions.openDispute({ orderId: order.id, reason, requestedResolution: resolution, description, evidence: [{ kind: "note", description: "Buyer submitted written evidence in demo." }] });
       onClose();
-    } catch (caught) { setError(caught instanceof Error ? caught.message : "Unable to open the dispute."); }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Unable to open the dispute.");
+    } finally {
+      setPending(false);
+    }
   };
   return (
     <form onSubmit={submit} className="space-y-5">
@@ -275,7 +297,7 @@ function DisputeForm({ order, onClose }: { order: Order; onClose: () => void }) 
         <textarea className={textareaClass} minLength={10} required value={description} onChange={(event) => setDescription(event.target.value)} placeholder="Describe the affected products, quantity, and what you observed…" />
       </Field>
       {error ? <p role="alert" className="rounded-xl bg-red-50 p-3 text-sm font-semibold text-red-700">{error}</p> : null}
-      <button className={`${primaryButtonClass} w-full`} type="submit"><FileText aria-hidden="true" size={17} /> Submit for review</button>
+      <button className={`${primaryButtonClass} w-full`} type="submit" disabled={pending}><FileText aria-hidden="true" size={17} /> {pending ? "Submitting…" : "Submit for review"}</button>
     </form>
   );
 }
@@ -288,6 +310,11 @@ export function BuyerWorkspace({ section }: { section: string }) {
   const [disputeOrder, setDisputeOrder] = useState<Order>();
   const [search, setSearch] = useState("");
   const [category, setCategory] = useState("all");
+  const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<
+    { kind: "success" | "error"; message: string } | null
+  >(null);
+  const pendingActionRef = useRef(false);
   const buyerId = currentOrganisation?.type === "buyer" ? currentOrganisation.id : state.organisations.find((item) => item.type === "buyer")?.id;
   const buyerDemands = state.demands.filter((item) => item.buyerOrganisationId === buyerId);
   const buyerOrders = state.orders.filter((item) => item.buyerOrganisationId === buyerId);
@@ -295,6 +322,28 @@ export function BuyerWorkspace({ section }: { section: string }) {
   const notifications = state.notifications.filter((item) => item.recipientUserId === currentUser?.id);
   const productFor = (id: string) => state.products.find((item) => item.id === id);
   const openDemand = (productId?: string) => { setInitialProduct(productId); setDemandOpen(true); };
+  const runAction = async (
+    key: string,
+    successMessage: string,
+    task: () => Promise<unknown>,
+  ) => {
+    if (pendingActionRef.current) return;
+    pendingActionRef.current = true;
+    setPendingAction(key);
+    setActionNotice(null);
+    try {
+      await task();
+      setActionNotice({ kind: "success", message: successMessage });
+    } catch (caught) {
+      setActionNotice({
+        kind: "error",
+        message: caught instanceof Error ? caught.message : "That action could not be saved.",
+      });
+    } finally {
+      pendingActionRef.current = false;
+      setPendingAction(null);
+    }
+  };
 
   const filteredListings = state.listings.filter((listing) => {
     if (listing.status !== "active") return false;
@@ -347,7 +396,49 @@ export function BuyerWorkspace({ section }: { section: string }) {
     content = <div className="space-y-6">{pageHeader("Orders and deliveries", "One consolidated order, even when several farmers are supplying it.")}
       <div className="space-y-4">{buyerOrders.map((order) => { const items = state.orderItems.filter((item) => order.itemIds.includes(item.id)); const shipment = state.shipments.find((item) => item.orderId === order.id); return <article key={order.id} className="surface p-5 sm:p-6"><div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div><div className="flex items-center gap-2"><p className="text-xs font-black text-[var(--muted)]">{order.reference}</p><StatusBadge status={order.status} /></div><h2 className="mt-2 text-xl font-black">{items.map((item) => productFor(item.productId)?.name.en).join(", ")}</h2><p className="mt-1 text-sm text-[var(--muted)]">Delivery {formatDate(order.deliveryDate)} · {order.deliveryAddress.city}</p></div><div className="sm:text-right"><p className="text-2xl font-black text-[var(--forest)]">{formatFcfa(order.total, locale)}</p><StatusBadge status={order.paymentStatus} label={`Payment ${humanize(order.paymentStatus)}`} /></div></div><BuyerOrderTimeline order={order} />
         <div className="mt-5 grid gap-3 rounded-2xl bg-[var(--cream)] p-4 sm:grid-cols-3"><div><p className="text-[10px] font-black uppercase tracking-wider text-[var(--muted)]">Items</p><p className="mt-1 text-sm font-bold">{items.length} product line{items.length === 1 ? "" : "s"}</p></div><div><p className="text-[10px] font-black uppercase tracking-wider text-[var(--muted)]">Sourcing</p><p className="mt-1 text-sm font-bold">{order.allocationIds.length} verified supplier{order.allocationIds.length === 1 ? "" : "s"}</p></div><div><p className="text-[10px] font-black uppercase tracking-wider text-[var(--muted)]">Delivery</p><p className="mt-1 text-sm font-bold">{shipment ? humanize(shipment.status) : "Planning pending"}</p></div></div>
-        <div className="mt-5 flex flex-wrap gap-2">{order.status === "quoted" ? <button onClick={() => actions.confirmOrder(order.id)} className={primaryButtonClass}><Check aria-hidden="true" size={16} /> Confirm offer</button> : null}{order.status === "confirmed" && order.paymentStatus !== "succeeded" ? <button onClick={() => setPaymentOrder(order)} className={primaryButtonClass}><WalletCards aria-hidden="true" size={16} /> Pay securely</button> : null}{order.status === "delivered" ? <><button onClick={() => actions.acceptDelivery(order.id)} className={primaryButtonClass}><CheckCircle2 aria-hidden="true" size={16} /> Accept delivery</button><button onClick={() => setDisputeOrder(order)} className={secondaryButtonClass}>Report a problem</button></> : null}<button className={secondaryButtonClass}><Download aria-hidden="true" size={16} /> Receipt</button></div>
+        <div className="mt-5 flex flex-wrap gap-2">
+          {order.status === "quoted" ? (
+            <button
+              disabled={pendingAction !== null}
+              onClick={() =>
+                void runAction(
+                  `confirm:${order.id}`,
+                  `${order.reference} confirmed.`,
+                  () => actions.confirmOrder(order.id),
+                )
+              }
+              className={primaryButtonClass}
+            >
+              <Check aria-hidden="true" size={16} />{" "}
+              {pendingAction === `confirm:${order.id}` ? "Confirming…" : "Confirm offer"}
+            </button>
+          ) : null}
+          {order.status === "confirmed" && order.paymentStatus !== "succeeded" ? (
+            <button disabled={pendingAction !== null} onClick={() => setPaymentOrder(order)} className={primaryButtonClass}>
+              <WalletCards aria-hidden="true" size={16} /> Pay securely
+            </button>
+          ) : null}
+          {order.status === "delivered" ? (
+            <>
+              <button
+                disabled={pendingAction !== null}
+                onClick={() =>
+                  void runAction(
+                    `accept:${order.id}`,
+                    `${order.reference} delivery accepted.`,
+                    () => actions.acceptDelivery(order.id),
+                  )
+                }
+                className={primaryButtonClass}
+              >
+                <CheckCircle2 aria-hidden="true" size={16} />{" "}
+                {pendingAction === `accept:${order.id}` ? "Accepting…" : "Accept delivery"}
+              </button>
+              <button disabled={pendingAction !== null} onClick={() => setDisputeOrder(order)} className={secondaryButtonClass}>Report a problem</button>
+            </>
+          ) : null}
+          <button className={secondaryButtonClass}><Download aria-hidden="true" size={16} /> Receipt</button>
+        </div>
       </article>; })}</div>
       {buyerOrders.length === 0 ? <EmptyState title="No orders yet" description="Orders appear after operations prepares a consolidated offer for one of your demands." /> : null}
     </div>;
@@ -358,7 +449,7 @@ export function BuyerWorkspace({ section }: { section: string }) {
     </div>;
   } else if (section === "notifications") {
     content = <div className="space-y-6">{pageHeader("Notification centre", "Order-critical updates remain available here even if an external message is delayed.")}
-      <div className="surface divide-y divide-[var(--line)] overflow-hidden">{notifications.map((item) => <button key={item.id} type="button" onClick={() => !item.readAt && actions.markNotificationRead(item.id)} className={`flex w-full items-start gap-4 p-5 text-left ${item.readAt ? "bg-white" : "bg-[var(--sage)]/45"}`}><span className={`mt-0.5 grid size-10 flex-none place-items-center rounded-xl ${item.readAt ? "bg-[var(--cream)] text-[var(--muted)]" : "bg-[var(--forest)] text-white"}`}><Bell size={17} /></span><span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="font-black">{localise(item.title, locale)}</span>{!item.readAt ? <span className="size-2 rounded-full bg-[var(--orange)]" /> : null}</span><span className="mt-1 block text-sm leading-6 text-[var(--muted)]">{localise(item.message, locale)}</span><span className="mt-2 block text-xs font-semibold text-[var(--muted)]">{formatRelativeDate(item.createdAt)}</span></span><ChevronRight className="mt-2 flex-none text-[var(--muted)]" size={17} /></button>)}{notifications.length === 0 ? <div className="p-10 text-center text-sm text-[var(--muted)]">You are all caught up.</div> : null}</div>
+      <div className="surface divide-y divide-[var(--line)] overflow-hidden">{notifications.map((item) => <button key={item.id} type="button" disabled={pendingAction !== null} onClick={() => { if (!item.readAt) void runAction(`notification:${item.id}`, "Notification marked as read.", () => actions.markNotificationRead(item.id)); }} className={`flex w-full items-start gap-4 p-5 text-left disabled:cursor-wait disabled:opacity-70 ${item.readAt ? "bg-white" : "bg-[var(--sage)]/45"}`}><span className={`mt-0.5 grid size-10 flex-none place-items-center rounded-xl ${item.readAt ? "bg-[var(--cream)] text-[var(--muted)]" : "bg-[var(--forest)] text-white"}`}><Bell size={17} /></span><span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="font-black">{localise(item.title, locale)}</span>{!item.readAt ? <span className="size-2 rounded-full bg-[var(--orange)]" /> : null}</span><span className="mt-1 block text-sm leading-6 text-[var(--muted)]">{localise(item.message, locale)}</span><span className="mt-2 block text-xs font-semibold text-[var(--muted)]">{formatRelativeDate(item.createdAt)}</span></span><ChevronRight className="mt-2 flex-none text-[var(--muted)]" size={17} /></button>)}{notifications.length === 0 ? <div className="p-10 text-center text-sm text-[var(--muted)]">You are all caught up.</div> : null}</div>
     </div>;
   } else if (section === "profile") {
     content = <div className="space-y-6">{pageHeader("Business profile", "The verified identity and delivery details farmers and operations can trust.")}
@@ -376,5 +467,24 @@ export function BuyerWorkspace({ section }: { section: string }) {
     </div>;
   }
 
-  return <>{content}<Modal open={demandOpen} onClose={() => setDemandOpen(false)} title="Post a buyer demand" description="Farmers may quote partial quantities; operations will consolidate the offer." width="max-w-4xl"><DemandForm onClose={() => setDemandOpen(false)} initialProductId={initialProduct} /></Modal><Modal open={Boolean(paymentOrder)} onClose={() => setPaymentOrder(undefined)} title="Confirm payment" description="Use a licensed external provider or verified business transfer.">{paymentOrder ? <PaymentForm order={paymentOrder} onClose={() => setPaymentOrder(undefined)} /> : null}</Modal><Modal open={Boolean(disputeOrder)} onClose={() => setDisputeOrder(undefined)} title="Report a delivery problem" description="Support will review the complete order, shipment, and evidence record.">{disputeOrder ? <DisputeForm order={disputeOrder} onClose={() => setDisputeOrder(undefined)} /> : null}</Modal></>;
+  return (
+    <>
+      {actionNotice ? (
+        <div
+          role="status"
+          className={`mb-5 rounded-xl p-3 text-sm font-semibold ${
+            actionNotice.kind === "success"
+              ? "bg-[var(--sage)] text-[var(--forest)]"
+              : "bg-red-50 text-red-700"
+          }`}
+        >
+          {actionNotice.message}
+        </div>
+      ) : null}
+      {content}
+      <Modal open={demandOpen} onClose={() => setDemandOpen(false)} title="Post a buyer demand" description="Farmers may quote partial quantities; operations will consolidate the offer." width="max-w-4xl"><DemandForm onClose={() => setDemandOpen(false)} initialProductId={initialProduct} /></Modal>
+      <Modal open={Boolean(paymentOrder)} onClose={() => setPaymentOrder(undefined)} title="Confirm payment" description="Use a licensed external provider or verified business transfer.">{paymentOrder ? <PaymentForm order={paymentOrder} onClose={() => setPaymentOrder(undefined)} /> : null}</Modal>
+      <Modal open={Boolean(disputeOrder)} onClose={() => setDisputeOrder(undefined)} title="Report a delivery problem" description="Support will review the complete order, shipment, and evidence record.">{disputeOrder ? <DisputeForm order={disputeOrder} onClose={() => setDisputeOrder(undefined)} /> : null}</Modal>
+    </>
+  );
 }

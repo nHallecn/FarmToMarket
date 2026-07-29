@@ -4,11 +4,14 @@ import {
   getRequestId,
 } from "@/lib/api-helpers";
 import { deriveDashboardMetrics } from "@/lib/domain";
-import { createSeedState } from "@/lib/seed-data";
+import { loadDomainState } from "@/server/db/state-repository";
+import { stateRouteError } from "@/server/db/state-http";
 
 const allowedRoles = new Set(["operations", "admin"]);
 
-export function GET(request: Request) {
+export const dynamic = "force-dynamic";
+
+export async function GET(request: Request) {
   const requestId = getRequestId(request);
   const role = request.headers.get("x-demo-role")?.trim().toLowerCase() ?? "";
 
@@ -22,49 +25,53 @@ export function GET(request: Request) {
     });
   }
 
-  const state = createSeedState();
-  const operationsUser = state.users.find((user) =>
-    user.roles.includes(role === "admin" ? "admin" : "operations"),
-  );
-  const metrics = deriveDashboardMetrics(
-    state,
-    operationsUser?.id ?? state.activeUserId,
-  );
-  const verificationReviews = state.organisations.filter(
-    (organisation) => organisation.verificationStatus === "pending",
-  ).length;
+  try {
+    const state = await loadDomainState();
+    const operationsUser = state.users.find((user) =>
+      user.roles.includes(role === "admin" ? "admin" : "operations"),
+    );
+    const metrics = deriveDashboardMetrics(
+      state,
+      operationsUser?.id ?? state.activeUserId,
+    );
+    const verificationReviews = state.organisations.filter(
+      (organisation) => organisation.verificationStatus === "pending",
+    ).length;
 
-  return dataResponse(
-    {
-      metrics,
-      actionQueues: {
-        verificationReviews,
-        unallocatedDemandItems: metrics.unallocatedDemandItems,
-        pickupsDue: metrics.pickupsDue,
-        deliveriesDue: metrics.deliveriesDue,
-        paymentExceptions: metrics.paymentExceptions,
-        openDisputes: metrics.openDisputes,
+    return dataResponse(
+      {
+        metrics,
+        actionQueues: {
+          verificationReviews,
+          unallocatedDemandItems: metrics.unallocatedDemandItems,
+          pickupsDue: metrics.pickupsDue,
+          deliveriesDue: metrics.deliveriesDue,
+          paymentExceptions: metrics.paymentExceptions,
+          openDisputes: metrics.openDisputes,
+        },
+        recentOrders: [...state.orders]
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+          .slice(0, 5)
+          .map((order) => ({
+            id: order.id,
+            reference: order.reference,
+            buyerOrganisationId: order.buyerOrganisationId,
+            status: order.status,
+            paymentStatus: order.paymentStatus,
+            shipmentStatus: order.shipmentStatus,
+            total: order.total,
+            currency: order.currency,
+            deliveryDate: order.deliveryDate,
+            updatedAt: order.updatedAt,
+          })),
+        sourceSnapshotAt: state.updatedAt,
+        generatedAt: new Date().toISOString(),
+        authorisedAs: role,
+        persisted: true,
       },
-      recentOrders: [...state.orders]
-        .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-        .slice(0, 5)
-        .map((order) => ({
-          id: order.id,
-          reference: order.reference,
-          buyerOrganisationId: order.buyerOrganisationId,
-          status: order.status,
-          paymentStatus: order.paymentStatus,
-          shipmentStatus: order.shipmentStatus,
-          total: order.total,
-          currency: order.currency,
-          deliveryDate: order.deliveryDate,
-          updatedAt: order.updatedAt,
-        })),
-      sourceSnapshotAt: state.updatedAt,
-      generatedAt: new Date().toISOString(),
-      authorisedAs: role,
-      demo: true,
-    },
-    { requestId },
-  );
+      { requestId },
+    );
+  } catch (error) {
+    return stateRouteError(error, requestId);
+  }
 }

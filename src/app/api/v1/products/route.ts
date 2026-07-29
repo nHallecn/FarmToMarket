@@ -1,19 +1,26 @@
 import { dataResponse, getRequestId } from "@/lib/api-helpers";
-import { createSeedState } from "@/lib/seed-data";
+import { loadDomainState } from "@/server/db/state-repository";
+import { stateRouteError } from "@/server/db/state-http";
 
-export function GET(request: Request) {
+export const dynamic = "force-dynamic";
+
+export async function GET(request: Request) {
   const requestId = getRequestId(request);
-  const state = createSeedState();
-  const items = [...state.products].sort((a, b) =>
-    a.name.en.localeCompare(b.name.en),
-  );
+  try {
+    const state = await loadDomainState();
+    const items = [...state.products].sort((a, b) =>
+      a.name.en.localeCompare(b.name.en),
+    );
 
-  return dataResponse(
-    {
-      items,
-      count: items.length,
-      demo: true,
-    },
-    { requestId },
-  );
+    return dataResponse(
+      {
+        items,
+        count: items.length,
+        persisted: true,
+      },
+      { requestId },
+    );
+  } catch (error) {
+    return stateRouteError(error, requestId);
+  }
 }
